@@ -1,0 +1,43 @@
+{
+  "table": "table_23",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 23 (p.142) of the thesis",
+  "note": "Table 23 lists five network-layer injection commands with their detection triggers and mitigations. The command strings are transcribed verbatim from data/attack_matrix.csv (rows A11–A15); the tool names and commands match the thesis's reference commands exactly. A fresh run of each simulator's _trigger_and_action() should return the trigger/action strings below; the command strings are the reference command, not the simulator's internal commands.",
+  "scenarios": {
+    "A11": {
+      "name": "DNS Query Flood",
+      "tool": "dnsperf",
+      "command": "dnsperf -s doh.server -d queries.txt -c 100 -Q 10000 -l 60",
+      "detection_trigger": "query_rate > per_source_threshold ∨ source_ip_distribution_anomaly",
+      "mitigation_action": "rate_limit via AMPS sandbox"
+    },
+    "A12": {
+      "name": "TLS Handshake Abuse",
+      "tool": "testssl",
+      "command": "testssl -jsonfile log.json -vulnerable -headers",
+      "detection_trigger": "cipher_suite_mismatch",
+      "mitigation_action": "reset_dot_tls()"
+    },
+    "A13": {
+      "name": "QUIC Reflection",
+      "tool": "quic-attack",
+      "command": "./quic_attack -reflect -amplify 50 -threads 16",
+      "detection_trigger": "response_size > amplification_threshold * query_size",
+      "mitigation_action": "rate_limit via AMPS sandbox"
+    },
+    "A14": {
+      "name": "HTTP/2 Continuation Flood",
+      "tool": "h2load",
+      "command": "h2load -n 100000 -c 1000 -m 100 https://doh.server/dns-query",
+      "detection_trigger": "continuation_count > max_concurrent_streams",
+      "mitigation_action": "enforce_h2_rfc7540()"
+    },
+    "A15": {
+      "name": "Encrypted Payload Fuzzing",
+      "tool": "boofuzz",
+      "command": "python3 doh_fuzzer.py --target doh.server:443 --runtime 300",
+      "detection_trigger": "wire_format_valid(payload) == False ∨ tls_decryption_error",
+      "mitigation_action": "terminate_doh_stream()"
+    }
+  }
+}
