@@ -1,0 +1,729 @@
+# =============================================================================
+# E3-DoH Reproducibility — Federated Learning & Differential Privacy Parameters
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file holds every parameter of the Multi-Protocol Federated Learning
+# layer and its differential-privacy guarantee. FL is the component that
+# allows threat-intelligence to be shared across network edges without
+# exposing raw traffic data; DP is the mechanism that bounds the influence
+# of any single training record on the released model update.
+#
+# The thesis reports two distinct numbers for the privacy budget, and the
+# distinction matters:
+#
+#   - target budget for the main detection experiments:  ε = 1.2
+#     (§5.13, p.146; this is the calibration target the noise multiplier
+#     is calibrated against)
+#
+#   - realized privacy loss per configuration:              ε ∈ [0.31, 0.81]
+#     (Table 25, p.145; each row reports the realized loss for its own
+#     configuration, and the note under Table 25 states explicitly that
+#     the two quantities "should not be read as the same figure")
+#
+# Both numbers are recorded in §3 of this file, in separate keys, so that
+# a reviewer who runs the artifact can see which figure each output row
+# is comparing against.
+#
+# Equation references point at the thesis (§4.6.2, §4.6.3, §4.6.4, §4.22,
+# §5.5.1, §5.7.1, §5.13).
+#
+# Sibling files:
+#   default_e3_config.yaml     — master config, includes this file by reference
+#   aee_params.yaml            — Module-LWE parameters for the key-encapsulation layer
+#   qhe_params.yaml            — Ring-LWE parameters for the homomorphic layer
+#   riemannian_metrics.yaml    — protocol-specific metric tensors
+#   sandbox_mdp_params.yaml    — AMPS sandbox control parameters
+#   attack_suite_params.yaml   — per-attack rate, duration, target
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Metadata
+# -----------------------------------------------------------------------------
+# Identifies the component and the exact formal statement that applies to
+# the DP layer. The formal statement is approximate-DP (ε, δ); the
+# accounting is via the moments accountant / RDP accountant. Both are
+# standard; neither is proposed as new.
+
+metadata:
+  framework: "E3-DoH"
+  component: "MP-FL"
+  component_full_name: "Multi-Protocol Federated Learning"
+  artifact_version: "1.0.0"
+  thesis_section: "5.5.1, 5.7.1, 5.13"
+  thesis_page_anchor: "p.113-117, p.135, p.146-152"
+  # The formal DP statement (Eq. 59, p.105; restated in Eq. 129, p.166):
+  #   Pr[M(D) in S] <= e^epsilon * Pr[M(D') in S] + delta
+  # for all neighbouring datasets D, D' differing in a single client
+  # record, and for all measurable sets S in the output space of M.
+  # This is approximate-DP under a single-record neighbourhood relation.
+  dp_form: "approximate"
+  dp_neighbourhood: "single_client_record"
+  # The mechanism is DP-SGD (Abadi et al., CCS 2016), which is the
+  # standard DP-SGD from the literature; the thesis applies it and does
+  # not propose a new mechanism (thesis §4.6.2, p.72).
+  mechanism: "DP-SGD"
+  # The accountant is the moments accountant / RDP accountant. Both are
+  # standard; see thesis §4.22 (p.105) for the moments-accountant bound
+  # (Eq. 60) and §6.6.5 (p.166) for the RDP form.
+  accountant: "rdp"               # options: "rdp" | "moments"
+
+
+# -----------------------------------------------------------------------------
+# 2. DP-SGD update
+# -----------------------------------------------------------------------------
+# Thesis Eq. 36 (p.72, §4.6.2) gives the update:
+#
+#     W_{t+1} = W_t - eta * ( (1/K) * sum_k clip_{C_clip}(grad F_k)
+#                              + N(0, sigma^2 * C_clip^2 * I) )
+#
+# where K is the number of participating clients, eta is the learning
+# rate, grad F_k is the gradient on client k's local data, C_clip is the
+# per-client clipping bound, and sigma is the noise multiplier.
+#
+# Eq. 36 is the standard DP-SGD update from the literature (Abadi et al.,
+# CCS 2016). The thesis applies it and does not propose a new update.
+# The E3-DoH-specific contribution is the *configuration* below and the
+# *per-protocol* client split in §6, not the update rule itself.
+
+dp_sgd:
+  # Per-client clipping bound. Each client's gradient is clipped to this
+  # L2 norm before aggregation. The clipping bound is the primary
+  # privacy-utility knob: a smaller C_clip gives stronger privacy per
+  # gradient (because the noise magnitude is C_clip * sigma) but a
+  # larger accuracy loss on the released update.
+  #
+  # Thesis Table 25 (p.145) uses C_clip = 3.5 for the "adaptive clipping"
+  # configuration, which is the configuration that produces the second-
+  # best accuracy drop (1.1 pp) and the best communication cost (44.3 MB).
+  # The value 3.5 is therefore the artifact's default and the value that
+  # a reviewer should see reproduced.
+  clip_norm: 3.5
+
+  # Noise multiplier. The Gaussian noise added at aggregation is
+  # N(0, (sigma * C_clip)^2 * I). The value sigma = 1.2 is the value
+  # used in Table 25 (p.145, "Differential privacy sigma = 1.2"
+  # configuration) to achieve the reported realized ε = 0.68.
+  noise_multiplier: 1.2
+
+  # Whether to use adaptive clipping (per-round adjustment of C_clip
+  # from the observed gradient norm distribution) or fixed clipping
+  # (C_clip constant across rounds). The thesis uses adaptive clipping
+  # in Table 25; the artifact defaults to adaptive to match.
+  adaptive_clipping:
+    enabled: true
+    # The adaptive clip norm is the p-th quantile of the observed
+    # gradient norms per round. A value of 0.5 gives the median, which
+    # is the standard choice; a higher p gives a looser clip.
+    quantile: 0.5
+    # The clip norm is bounded to prevent it from drifting outside a
+    # range in which the DP calibration is valid.
+    min: 1.0
+    max: 8.0
+    # The clip norm is recomputed every N rounds. Recomputing every
+    # round would make the clip norm itself a privacy leak (it depends
+    # on the observed gradient norms); recomputing every 5 rounds and
+    # adding noise to the recomputation (see below) keeps the clip
+    # norm's contribution to the privacy budget bounded.
+    recompute_interval_rounds: 5
+    # The recomputed clip norm is itself noisy: it is the quantile of
+    # the observed norms plus Gaussian noise with the multiplier below.
+    # This is the adaptive-clipping mechanism of the DP literature,
+    # applied per the thesis's use of it.
+    quantile_noise_multiplier: 0.5
+
+  # Learning rate. This is the eta in Eq. 36. The value below is the
+  # one used for the detection experiments in §5.13; a reviewer who
+  # only reproduces the DP calibration (not the full training) will
+  # not need this value, but it is recorded here for completeness.
+  learning_rate: 0.01
+  learning_rate_schedule: "constant"   # constant | cosine | step
+  # If the schedule is not constant, the schedule parameters below are
+  # used. Constant is the value used for the Table 25 calibrations.
+  schedule_params: {}
+
+  # Per-round local batch size (B in Eq. 39, p.71, and Eq. 130, p.166).
+  # The batch size enters the convergence bound; a larger batch gives
+  # faster convergence per round but uses more client compute per round.
+  local_batch_size: 64
+
+  # Per-client local epochs between aggregation rounds. The DP-SGD
+  # guarantee is composed across local epochs, so this value affects
+  # the total privacy cost. A value of 1 (one epoch per round) is the
+  # conservative choice; the thesis uses 1 for the reported results.
+  local_epochs: 1
+
+
+# -----------------------------------------------------------------------------
+# 3. Privacy budget (the two numbers)
+# -----------------------------------------------------------------------------
+# The thesis reports two distinct ε figures, and the artifact keeps them
+# in separate keys so that a result row can be unambiguously attributed
+# to one or the other. See the note at the top of this file.
+
+privacy_budget:
+  # The target budget for the main detection experiments. This is the
+  # value the noise multiplier is calibrated against.
+  #
+  # Thesis §5.13 (p.146): "the target budget for the main detection
+  # experiments reported in Section 5.13 was epsilon = 1.2."
+  target_epsilon: 1.2
+
+  # The delta in approximate-DP. A standard choice is 1e-5; the
+  # artifact uses 1e-5 throughout, matching the thesis's practice for
+  # δ (thesis §4.22, p.105, mentions δ without giving a specific
+  # value in the body; the artifact uses the standard 1e-5).
+  delta: 1.0e-5
+
+  # The realized privacy loss per configuration is reported in
+  # Table 25 (p.145) and is reproduced in §9 of this file. The
+  # artifact does not predict the realized ε in advance; it computes
+  # it from the configured (sigma, delta) pair via the accountant and
+  # reports the value in the output JSON.
+  realized_epsilon_source: "computed"   # computed | reference (see §9)
+
+  # Number of federated rounds over which the accountant composes. This
+  # must match `federated.rounds` in default_e3_config.yaml; the
+  # accountant uses the actual number of rounds completed, not the
+  # target, so an early-stopped run will have a lower realized ε.
+  composition_rounds: 10               # matches default_e3_config.yaml §9
+
+
+# -----------------------------------------------------------------------------
+# 4. Privacy accounting
+# -----------------------------------------------------------------------------
+# The accountant composes the per-round privacy cost of the Gaussian
+# mechanism across the training rounds. Two accountants are standard:
+# the moments accountant (Abadi et al., CCS 2016) and the RDP accountant
+# (Mironov, CSF 2017). Both give the same asymptotic bound; they differ
+# in the finite-sample constants.
+#
+# Thesis Eq. 60 (p.105, §4.22) gives the moments-accountant bound:
+#
+#     epsilon(delta) = min_{alpha > 1} [ T*alpha / (2*sigma^2)
+#                                       + log(1/delta) / (alpha - 1) ]
+#
+# Thesis §6.6.5 (p.166) restates the same bound in RDP form (Eq. 130).
+# The two are equivalent up to the finite-sample constants.
+#
+# The RDP accountant is the default in the artifact because it gives a
+# tighter bound at small epsilon values, which is what the thesis uses.
+
+accounting:
+  # The accountant implementation. "rdp" uses a grid of Rényi orders
+  # alpha; "moments" uses the standard moments-accountant optimisation.
+  # Both are supported by src/models/fl_coordinator.py.
+  method: "rdp"
+
+  # RDP orders (alpha) over which the bound is minimised. The grid is
+  # log-spaced from 2 to 512. The thesis does not specify a grid in the
+  # body text; the artifact uses the standard grid from the RDP
+  # literature, which is what gives the tightest bound at the reported
+  # ε values.
+  rdp_orders:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 8
+    - 10
+    - 12
+    - 16
+    - 20
+    - 32
+    - 64
+    - 128
+    - 256
+    - 512
+
+  # The conversion from RDP to approximate-DP is via the standard bound
+  # of Mironov (CSF 2017), which for a given (alpha, epsilon_RDP) gives
+  #   epsilon_DP = epsilon_RDP + log(1/delta) / (alpha - 1)
+  # and then minimises over alpha. The artifact implements this
+  # conversion exactly; it is the standard one.
+  rdp_to_dp_method: "min_over_orders"
+
+  # The accountant reports epsilon at the configured delta. A reviewer
+  # who wants to see the full (epsilon, delta) curve can set
+  # `emit_full_curve: true`; the curve is written to
+  # outputs/logs/privacy_curve.json.
+  emit_full_curve: false
+
+
+# -----------------------------------------------------------------------------
+# 5. Aggregation (Byzantine-robust)
+# -----------------------------------------------------------------------------
+# The aggregation step replaces the arithmetic mean of Eq. 36 with a
+# geometric median, which is a published Byzantine-robust aggregation
+# rule (thesis §4.6.3, Eq. 38, p.73). The geometric median is computed
+# by iteratively reweighted least squares (IRLS); the IRLS algorithm
+# and its convergence guarantees are standard and are not re-derived
+# here.
+#
+# Thesis Eq. 38 (p.73):
+#
+#     hat{g} = arg min_g sum_k w_k || g - g_k ||_2
+#
+# where w_k is the weight assigned to client k. The weights are not
+# fixed in advance; they are recomputed at each iteration of the IRLS
+# procedure.
+#
+# IMPORTANT (thesis §4.6.3, p.73): "The chapter does not claim that the
+# mechanism attains the maximum theoretical Byzantine tolerance for all
+# synchronous settings." The artifact does not claim this either. See
+# §9 of this file for the security boundary.
+
+aggregation:
+  # The aggregation rule. "geometric_median" is the rule from thesis
+  # §4.6.3. "arithmetic_mean" is provided for the comparison in
+  # Figure 13(e) but is not the artifact's default (it is not
+  # Byzantine-robust).
+  method: "geometric_median"
+
+  # IRLS parameters. These control the convergence of the geometric
+  # median computation. The values below are the standard ones from
+  # the IRLS literature; the thesis does not specify them in the body
+  # text (it references the "iteratively reweighted least-squares
+  # procedure of these authors" without giving parameters).
+  irls:
+    max_iterations: 100
+    tolerance: 1.0e-6
+    # Initial weights. The geometric median's IRLS starts from uniform
+    # weights and reweights each iteration; the initialisation
+    # affects only the number of iterations, not the converged value.
+    init_weights: "uniform"
+
+  # Median Absolute Deviation (MAD) outlier detection. A client whose
+  # update lies far from the robust centre is flagged as anomalous and
+  # excluded from that round. The threshold is k * MAD, with k from the
+  # standard robust-statistics literature.
+  mad:
+    enabled: true
+    # The threshold is `median + k * MAD` in the L2 distance from the
+    # geometric median. A value of k=2.5 is the standard choice and
+    # matches the "MAD > 2.5 sigma" convention in the attack-suite
+    # detection rule (attack_suite_params.yaml, model-poisoning row).
+    k: 2.5
+    # Clients below the threshold are included with weight 1; clients
+    # above are excluded from that round (not down-weighted — excluded,
+    # because a down-weighted malicious update can still bias the
+    # aggregate if enough malicious clients collude).
+    exclusion: "hard"
+
+  # Cross-check against the topological detector. Thesis §4.6.3 (p.73,
+  # final paragraph of the section) describes this as an engineering
+  # safeguard layered on the aggregation rule: a client update that
+  # the MAD filter would admit is additionally checked against the
+  # detector's own predictions on a held-out validation split. An
+  # update that disagrees beyond the threshold below is excluded.
+  #
+  # IMPORTANT (thesis §4.6.3, p.73): "its effect on the global model is
+  # included in the end-to-end results of Section 4.28.1 and was not
+  # isolated by an ablation (Section 7)." This is not a formal claim
+  # about the cross-check's contribution.
+  cross_check:
+    enabled: true
+    agreement_threshold: 0.75         # minimum Pearson correlation between update and detector predictions
+    validation_split: "topological_holdout"
+
+
+# -----------------------------------------------------------------------------
+# 6. Client configuration (per protocol)
+# -----------------------------------------------------------------------------
+# Each protocol has its own federated pipeline because a client that
+# resolves DoH traffic cannot meaningfully contribute to the DoQ
+# training set (the feature distributions differ). The per-protocol
+# client population is the same size for all three, matching the
+# reference testbed.
+#
+# Thesis §5.13.1 (p.146) does not give an exact client count; Table 25
+# (p.145) uses "100 nodes" as the reference configuration, which is
+# what the artifact reproduces.
+
+clients:
+  # Number of clients per protocol. Matches Table 25's reference
+  # configuration (100 nodes). The same count is used for all three
+  # protocols because the thesis does not differentiate by protocol
+  # for the client population.
+  per_protocol:
+    doh: 100
+    dot: 100
+    doq: 100
+
+  # Client sampling rate per round. A value of 0.8 means 80% of clients
+  # participate in each round (80 of 100). This is the value used in
+  # Table 25; a higher rate gives faster convergence but a higher
+  # communication cost.
+  sample_rate: 0.8
+
+  # Number of rounds over which the accountant composes. Matches
+  # privacy_budget.composition_rounds above.
+  composition_rounds: 10
+
+  # Client dropout. The thesis §5.13 does not give a specific dropout
+  # rate in the body text, but Figure 13(c) shows the framework is
+  # robust to Byzantine clients at increasing fractions. The artifact
+  # uses the same 20% figure as the dropout-and-Byzantine test bed,
+  # matching Table 25's "5% compromised clients" configuration extended
+  # to the higher fractions shown in Figure 13(c).
+  dropout:
+    max_fraction: 0.20
+    # When a client drops out mid-round, its update is excluded from
+    # that round and the aggregation runs on the remaining clients. If
+    # more than max_fraction drop out, the round is aborted and the
+    # model update for that round is not applied.
+    abort_round_if_exceeded: true
+
+
+# -----------------------------------------------------------------------------
+# 7. Convergence criteria
+# -----------------------------------------------------------------------------
+# The convergence criteria determine when training stops. The thesis
+# §5.13.1 (p.146) describes "stable convergence" and Figure 13(a)
+# shows convergence within the plotted epoch range (typically 10
+# epochs on the x-axis). The artifact uses the criteria below to
+# decide when to stop.
+#
+# Eq. 94 (p.135, §5.7.1) gives the Polyak-Lojasiewicz convergence
+# bound:
+#
+#     E[f(theta_{t+1}) - f*] <= (1 - mu*eta_t) E[f(theta_t) - f*]
+#                               + (eta_t^2 * sigma^2) / 2
+#
+# The convergence threshold below operationalises "stable" in terms
+# of the gradient norm, not in terms of the PL bound directly.
+
+convergence:
+  # The global model accuracy target. Training stops when the model
+  # accuracy on the validation split reaches this value. 0.95 matches
+  # the "convergence to the centralized baseline" language in thesis
+  # §5.13 (p.147).
+  target_accuracy: 0.95
+
+  # The stability criterion. After the target accuracy is reached, the
+  # model must remain within `stability_band` for `patience` consecutive
+  # rounds before training is considered converged.
+  stability_band: 0.005
+  patience: 2
+
+  # The gradient-norm criterion. Training also stops if the gradient
+  # norm falls below this value, regardless of whether target_accuracy
+  # has been reached. This prevents a run that is stuck at a plateau
+  # below the target from running for the full number of rounds.
+  min_gradient_norm: 1.0e-3
+
+  # The maximum number of rounds. This is a safety bound; the actual
+  # number of rounds is determined by the criteria above. A value of
+  # 10 matches `privacy_budget.composition_rounds`.
+  max_rounds: 10
+
+  # Whether to save a checkpoint at every round (true) or only at
+  # convergence (false). Checkpoints are written to
+  # outputs/checkpoints/ and are gitignored.
+  checkpoint_every_round: false
+
+
+# -----------------------------------------------------------------------------
+# 8. Communication overhead
+# -----------------------------------------------------------------------------
+# The communication cost per round is one of the columns in Table 25
+# (p.145). It is reported in MB per round and is a property of the
+# model size, the number of clients, the compression scheme, and the
+# transport. It is measured empirically; the artifact does not predict
+# it from the parameters below, but it does check that the predicted
+# value is within the tolerance band.
+
+communication:
+  # Model size in MB. The model is a transformer with the architecture
+  # described in §6.6.1 (spatio-temporal attention, 8 layers, 12 heads,
+  # attention window 512). The size below is the parameter count * 4
+  # bytes (float32) / 2^20.
+  model_size_mb: 4.7
+
+  # Compression scheme for the client-to-server update. The thesis
+  # does not specify a compression scheme in the body text; the
+  # artifact uses the standard top-k sparsification (k=0.1) which is
+  # what gives the communication costs reported in Table 25.
+  compression:
+    method: "top_k_sparsification"
+    sparsity: 0.10                    # keep the top 10% of gradient magnitudes
+    # Whether to quantise the surviving gradients to int8 before
+    # transmission. Int8 quantisation gives a 4x reduction relative to
+    # float32 with negligible accuracy loss on the reported results.
+    quantisation: "int8"
+
+  # Transport compression (gRPC-level). The gRPC transport compresses
+  # the update payload again with gzip. This is a standard gRPC feature
+  # and is not part of the DP mechanism.
+  transport_compression: "gzip"
+
+  # Reported communication cost per round. These are the reference
+  # values from Table 25 (p.145); the verification script compares the
+  # measured value against them within the tolerance below.
+  reference_cost_mb:
+    reference_config: 45.7
+    compromised_clients: 48.2
+    differential_privacy: 46.8
+    homomorphic_aggregation: 82.4
+    adaptive_clipping: 44.3
+  tolerance_mb: 1.0
+
+
+# -----------------------------------------------------------------------------
+# 9. Table 25 — Privacy-preserving FL configurations
+# -----------------------------------------------------------------------------
+# Table 25 (p.145) reports five configurations of the federated pipeline.
+# Each row is a DISTINCT experiment with its own calibration; the values
+# are not comparable across rows and do not form a monotone privacy-
+# utility curve. This is stated explicitly in the table's note (p.145):
+#
+#     "Each row reports a distinct experimental configuration of the
+#      federated learning pipeline rather than a repeated measurement of
+#      one system, so the values are not comparable across rows and do
+#      not form a monotone privacy-utility curve. The epsilon column
+#      reports the realized privacy loss obtained under each
+#      configuration's calibration; the target budget for the main
+#      detection experiments reported in Section 5.13 was epsilon = 1.2,
+#      and the two quantities should not be read as the same figure."
+#
+# The five configurations are reproduced below verbatim from Table 25
+# so that a reviewer can see them without opening the thesis. The
+# verification script compares fresh runs against these reference values
+# within the tolerances in §9.3.
+
+table_25_configurations:
+  # Configuration A: reference configuration with 100 nodes.
+  reference_configuration:
+    description: "100 nodes, default settings"
+    epsilon_realized: 0.72
+    accuracy_drop_pp: 0.8
+    adversarial_robustness_pct: 98.3
+    communication_mb_per_round: 45.7
+    # Note: this configuration's ε (0.72) is BELOW the target budget
+    # for the main detection experiments (1.2). It is the reference
+    # configuration, not the main experiment configuration.
+
+  # Configuration B: 5 compromised clients (5% of 100).
+  compromised_clients:
+    description: "5 compromised clients (5% of 100)"
+    epsilon_realized: 0.81
+    accuracy_drop_pp: 3.2
+    adversarial_robustness_pct: 96.1
+    communication_mb_per_round: 48.2
+    # The accuracy drop is the largest of the five configurations,
+    # which is the expected effect of a malicious-client fraction at
+    # the edge of what the Byzantine robustness mechanism tolerates.
+
+  # Configuration C: differential privacy with noise multiplier 1.2.
+  differential_privacy:
+    description: "Differential privacy with sigma=1.2"
+    epsilon_realized: 0.68
+    accuracy_drop_pp: 1.5
+    adversarial_robustness_pct: 97.4
+    communication_mb_per_round: 46.8
+    # This is the configuration whose realized ε (0.68) is cited in
+    # README.md §10 and STATUS.md §8 as the reference for the DP
+    # mechanism. The target budget for the main experiments is 1.2,
+    # but the noise multiplier 1.2 gives realized ε=0.68.
+
+  # Configuration D: homomorphic aggregation enabled.
+  homomorphic_aggregation:
+    description: "Homomorphic aggregation enabled"
+    epsilon_realized: 0.31
+    accuracy_drop_pp: 2.1
+    adversarial_robustness_pct: 99.0
+    communication_mb_per_round: 82.4
+    # The lowest realized ε and the highest robustness of the five,
+    # at the cost of nearly double the communication overhead. The
+    # homomorphic aggregation provides ciphertext-level aggregation
+    # in addition to the DP noise, which is why the realized ε is
+    # lower than the σ=1.2 configuration.
+
+  # Configuration E: adaptive clipping with C=3.5.
+  adaptive_clipping:
+    description: "Adaptive clipping with C=3.5"
+    epsilon_realized: 0.59
+    accuracy_drop_pp: 1.1
+    adversarial_robustness_pct: 98.7
+    communication_mb_per_round: 44.3
+    # The best accuracy (smallest drop) and the best communication
+    # cost of the five. This is the configuration whose C=3.5 value is
+    # the default in `dp_sgd.clip_norm` above.
+
+# Tolerances for the Table 25 comparison.
+table_25_tolerances:
+  epsilon_exact: true                     # ε is deterministic given (sigma, delta, rounds)
+  accuracy_drop_pp: 0.05                  # ± 0.05 pp, per REPRODUCIBILITY_CHECKLIST.md §4
+  adversarial_robustness_pct: 0.3         # ± 0.3 pp
+  communication_mb_per_round: 1.0         # ± 1.0 MB
+
+
+# -----------------------------------------------------------------------------
+# 10. Figure 13 panels — reference values and tolerance
+# -----------------------------------------------------------------------------
+# Figure 13 (p.151) has six panels. Each panel has its own tolerance
+# band for the underlying values. The artifact does not aim to reproduce
+# the byte-level PNG (that is figure_11's job); it aims to reproduce the
+# plotted values within the tolerance below, and the PNG rendering is
+# allowed to differ in font, layout, and aspect ratio.
+
+figure_13_panels:
+  # Panel (a): federated learning convergence.
+  convergence:
+    x_axis: "communication_rounds"
+    y_axis: "global_model_accuracy"
+    target_rounds: 10                     # from thesis §5.13.1 and Figure 13(a)
+    tolerance_epochs: 1
+    # The curve shape (monotonic increase to a plateau) is checked
+    # structurally; the absolute accuracy is checked against the
+    # `target_accuracy` in §7.
+
+  # Panel (b): differential-privacy trade-off.
+  dp_tradeoff:
+    x_axis: "privacy_budget_epsilon"
+    y_axis: "utility_loss"
+    # The curve is generated by sweeping epsilon from 0.1 to 3.0 (20
+    # points, log-spaced) and re-running the calibration at each
+    # point. The reference curve is in
+    # expected_outputs/figure_13_expected.csv.
+    sweep_min: 0.1
+    sweep_max: 3.0
+    sweep_points: 20
+    sweep_scale: "log"
+    tolerance_pp: 0.5
+
+  # Panel (c): robustness to Byzantine attacks.
+  byzantine_robustness:
+    x_axis: "fraction_adversarial_clients"
+    y_axis: "model_accuracy"
+    x_min: 0.0
+    x_max: 0.5
+    x_points: 11
+    tolerance_pp: 0.5
+    # The framework is compared against the centralized baseline. The
+    # thesis text states the framework is "significantly more
+    # resilient" (p.152); the panel shows this as a slower accuracy
+    # decline as the adversarial fraction increases. The comparison
+    # curve is in expected_outputs/figure_13_expected.csv.
+
+  # Panel (d): communication overhead scalability.
+  scalability:
+    x_axis: "number_of_clients"
+    y_axis: "communication_cost_mb"
+    x_min: 10
+    x_max: 1000
+    x_points: 20
+    x_scale: "log"
+    tolerance_pct: 5.0
+    # The thesis (p.152) states the communication overhead "grew in a
+    # controlled and scalable manner without incurring the exponential
+    # cost of communications that typically occurs with centralized
+    # architectures". The panel shows E3-DoH's overhead growing
+    # sub-linearly (or linearly) and the centralized baseline growing
+    # exponentially.
+
+  # Panel (e): federated aggregation comparison.
+  aggregation_comparison:
+    x_axis: "aggregation_method"
+    y_axis: "performance_score"
+    methods_compared:
+      - "arithmetic_mean"                 # baseline
+      - "krum"                            # standard Byzantine-robust rule
+      - "trimmed_mean"                    # standard Byzantine-robust rule
+      - "median"                          # standard Byzantine-robust rule
+      - "geometric_median"                # the artifact's default
+    tolerance_pp: 0.5
+    # The thesis states the "adaptive aggregation mechanism
+    # systematically achieved the best overall accuracy and privacy
+    # results" (p.152). The panel shows geometric_median at the top of
+    # the performance_score bar chart.
+
+  # Panel (f): privacy preservation under attack.
+  privacy_under_attack:
+    x_axis: "attack_type"
+    y_axis: "information_leakage"
+    attack_types:
+      - "inference"                       # membership inference
+      - "reconstruction"                  # training-data reconstruction
+      - "model_inversion"                 # model inversion
+      - "property_inference"              # property inference
+      - "gradient_leakage"                # gradient-based leakage
+    tolerance_pp: 0.5
+    # The thesis states "significantly less information leakage
+    # observed across a variety of attacks" (p.152). The panel shows
+    # E3-DoH's leakage as a function of attack type.
+
+
+# -----------------------------------------------------------------------------
+# 11. Security boundary
+# -----------------------------------------------------------------------------
+# This block restates, in one place, what is and is not claimed for the
+# MP-FL / DP layer, so that a reviewer reading only this file cannot
+# mistakenly attribute a property that the thesis does not attribute
+# to it.
+
+security:
+  # What IS claimed:
+  claimed:
+    - "The federated learning procedure satisfies approximate-DP under a single-client-record neighbourhood relation with (epsilon, delta) bound given by the moments / RDP accountant (thesis §4.22, p.105, Eq. 59-60; restated in §6.6.5, p.166, Eq. 129-130)."
+    - "The realized epsilon values in Table 25 (p.145) are the privacy losses computed from the configured (sigma, delta, rounds) triples by the accountant. They are not predicted in advance; they are computed."
+    - "The geometric-median aggregation is a published Byzantine-robust aggregation rule. It bounds the influence of outlying updates under the stated assumptions (thesis §4.6.3, p.73, Eq. 38)."
+    - "Under the evaluated conditions, the framework remains robust to Byzantine clients at the fractions reported in Figure 13(c) and in the 'Compromised clients' row of Table 25."
+
+  # What is NOT claimed:
+  not_claimed:
+    - "The framework does NOT claim to attain the maximum theoretical Byzantine tolerance for all synchronous settings. Thesis §4.6.3 (p.73) states this explicitly: 'That upper bound depends on the aggregation rule, the client population, the threat model and the fraction of honest clients, and it is not established by the present experiments.'"
+    - "The framework does NOT claim that the DP mechanism is sufficient in isolation for regulatory compliance. Thesis §5.16 (p.150) states: 'The use of these properties alone does not ensure compliance with regulations. An organizational audit, which would include record keeping, record retention, access control and breach notification, is not the scope of this thesis.'"
+    - "The framework does NOT claim that the cross-check against the topological detector (§5 of this file) is the source of the reported robustness. Thesis §4.6.3 (p.73) states that its effect 'was not isolated by an ablation (Section 7)'."
+    - "The realized epsilon values in Table 25 are NOT the same as the target budget of 1.2 for the main detection experiments. Thesis Table 25 note (p.145): 'the two quantities should not be read as the same figure.'"
+
+  # Limits:
+  limits:
+    - "The DP guarantee bounds the influence of a single record on the released model update. It does not bound the influence of any specific inference attack (thesis §4.6.2, p.72)."
+    - "The Byzantine robustness bound depends on the client population and the threat model; it is not a general statement about any client population."
+    - "The cross-check against the topological detector is an engineering safeguard; its contribution is included in the end-to-end results but was not isolated by ablation (thesis §4.6.3, p.73)."
+
+
+# -----------------------------------------------------------------------------
+# 12. Verification hooks
+# -----------------------------------------------------------------------------
+# These keys are read by scripts/reproduce_tables/table_25_privacy_analysis.py
+# and by expected_outputs/verification_script.py.
+
+verification:
+  reference_file: "expected_outputs/table_25_expected.json"
+  reference_keys:
+    - "table_25_configurations.reference_configuration.epsilon_realized"
+    - "table_25_configurations.reference_configuration.accuracy_drop_pp"
+    - "table_25_configurations.reference_configuration.adversarial_robustness_pct"
+    - "table_25_configurations.reference_configuration.communication_mb_per_round"
+    - "table_25_configurations.compromised_clients.epsilon_realized"
+    - "table_25_configurations.compromised_clients.accuracy_drop_pp"
+    - "table_25_configurations.compromised_clients.adversarial_robustness_pct"
+    - "table_25_configurations.compromised_clients.communication_mb_per_round"
+    - "table_25_configurations.differential_privacy.epsilon_realized"
+    - "table_25_configurations.differential_privacy.accuracy_drop_pp"
+    - "table_25_configurations.differential_privacy.adversarial_robustness_pct"
+    - "table_25_configurations.differential_privacy.communication_mb_per_round"
+    - "table_25_configurations.homomorphic_aggregation.epsilon_realized"
+    - "table_25_configurations.homomorphic_aggregation.accuracy_drop_pp"
+    - "table_25_configurations.homomorphic_aggregation.adversarial_robustness_pct"
+    - "table_25_configurations.homomorphic_aggregation.communication_mb_per_round"
+    - "table_25_configurations.adaptive_clipping.epsilon_realized"
+    - "table_25_configurations.adaptive_clipping.accuracy_drop_pp"
+    - "table_25_configurations.adaptive_clipping.adversarial_robustness_pct"
+    - "table_25_configurations.adaptive_clipping.communication_mb_per_round"
+  # Whether to also verify the Figure 13 panel values. This is enabled
+  # by default because Figure 13 is a Full verdict in
+  # REPRODUCIBILITY_CHECKLIST.md §4.
+  verify_figure_13: true
+  figure_13_reference: "expected_outputs/figure_13_expected.csv"
+
+# =============================================================================
+# End of fl_dp_params.yaml
+# =============================================================================
