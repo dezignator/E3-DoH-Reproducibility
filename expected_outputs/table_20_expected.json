@@ -1,0 +1,24 @@
+{
+  "table": "table_20",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 20 (p.138) of the thesis",
+  "note": "The five stage latencies below are the thesis reference values. In toy mode, the measured latencies are expected to be faster (synthetic data, no real network); the verification_script reports a toy-mode mismatch as a warning, not a failure. In full mode, values should be within the tolerances below. The per-stage tolerances are also recorded in REPRODUCIBILITY_CHECKLIST.md §4.",
+  "rows": {
+    "parsing_latency_us": 15.0,
+    "extraction_latency_us": 45.0,
+    "scoring_latency_ms": 0.08,
+    "decision_latency_ms": 0.12,
+    "mitigation_latency_ms": 1.5
+  },
+  "capture": {
+    "throughput_mpps": 8.7,
+    "cpu_pct_per_core": 12.0
+  },
+  "tolerances": {
+    "parsing_latency_us": 15.0,
+    "extraction_latency_us": 15.0,
+    "scoring_latency_ms": 0.02,
+    "decision_latency_ms": 0.02,
+    "mitigation_latency_ms": 0.2
+  }
+}
