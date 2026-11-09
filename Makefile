@@ -28,13 +28,7 @@
 #     make clean-all      Also remove virtualenv, caches, etc.
 #     make schema-check   Validate the master config against configs/schema.json
 #
-# The `make toy` target is what a reviewer runs first after `make install`.
-#
 # =============================================================================
-
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
 
 PYTHON ?= python
 PIP    ?= pip
@@ -44,7 +38,6 @@ BLACK  ?= black
 
 MODE ?= toy
 
-# Colours (no-op if not on a TTY).
 ifeq ($(shell test -t 1 && echo yes),yes)
     OK   := \033[0;32m
     WARN := \033[0;33m
@@ -56,10 +49,6 @@ else
     ERR  :=
     NC   :=
 endif
-
-# -----------------------------------------------------------------------------
-# Default target
-# -----------------------------------------------------------------------------
 
 .DEFAULT_GOAL := help
 
@@ -143,7 +132,7 @@ typecheck:  ## Type-check with mypy (src/ and scripts/)
 .PHONY: toy
 toy:  ## Run the full toy pipeline (synthetic corpus, ~10 min)
 	MODE=toy bash scripts/reproduce_all.sh --mode toy
-	@echo -e "$(OK)Toy pipeline complete. Run 'make verify' next.$(NC)"
+	@echo -e "$(OK)Toy pipeline complete. Run 'make verify-all' next.$(NC)"
 
 .PHONY: full
 full:  ## Run the full pipeline on the reference testbed (~6-9 h)
@@ -192,10 +181,9 @@ manifest:  ## Regenerate expected_outputs/MANIFEST.sha256
 
 .PHONY: schema-check
 schema-check:  ## Validate the master config against configs/schema.json
-	$(PYTHON) -c "import json, yaml, sys; \
+	$(PYTHON) -c "import json, yaml, jsonschema; \
 		cfg = yaml.safe_load(open('configs/default_e3_config.yaml')); \
 		schema = json.load(open('configs/schema.json')); \
-		import jsonschema; \
 		jsonschema.validate(cfg, schema); \
 		print('config validates against schema.json')"
 
@@ -212,11 +200,11 @@ clean:  ## Remove outputs, features, synthetic data (keeps .git)
 	@echo -e "$(OK)Cleaned outputs/, data/processed/features/, data/synthetic/, artifacts/$(NC)"
 
 .PHONY: clean-all
-clean-all: clean  ## Also remove .venv, caches, and the .git directory is preserved
+clean-all: clean  ## Also remove .venv, caches, and MANIFEST.sha256
 	rm -rf .venv venv 2>/dev/null || true
 	rm -rf .pytest_cache .ruff_cache .mypy_cache .numba_cache 2>/dev/null || true
 	rm -rf htmlcov .coverage .coverage.* coverage.xml 2>/dev/null || true
-	rm -rf **/__pycache__ 2>/dev/null || true
+	find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 	rm -f expected_outputs/MANIFEST.sha256 2>/dev/null || true
 	@echo -e "$(WARN)Removed virtualenv, caches, coverage, and MANIFEST.sha256$(NC)"
 	@echo -e "$(WARN)Restore MANIFEST.sha256 with 'make manifest' before committing$(NC)"
@@ -230,15 +218,16 @@ state:  ## Print the artifact's coherence state (from data_utils self-test)
 	$(PYTHON) data/data_utils.py
 
 .PHONY: info
-info:  ## Print environment info (Python, dependency versions, hardware)
-	@$(PYTHON) -c "import sys, platform, importlib.metadata as m; \
+info:  ## Print environment info (Python, dependency versions, platform)
+	@$(PYTHON) -c "import sys, platform; \
 		print('Python:', sys.version.split()[0]); \
-		print('Platform:', platform.platform()); \
+		print('Platform:', platform.platform())"
+	@$(PYTHON) -c "import importlib.metadata as m; \
 		pkgs = ['numpy', 'scipy', 'pandas', 'torch', 'scikit-learn', 'opacus', 'scapy', 'dask']; \
 		print('Packages:'); \
-		[print(f'  {p}=={m.version(p)}') if _safe_version(p, m) else print(f'  {p} (not installed)') for p in pkgs]"
-
-# Helper used by `info` — defined in Python because Make cannot inline it cleanly.
-define _safe_version_check
-python -c "import importlib.metadata as m; m.version('$(1)')" >/dev/null 2>&1 && echo yes || echo no
-endef
+		[print(f'  {p}=={m.version(p)}') if _safe(p, m) else print(f'  {p} (not installed)') for p in pkgs]; \
+		" 2>/dev/null || $(PYTHON) -c "import importlib.metadata as m; \
+		pkgs = ['numpy', 'scipy', 'pandas', 'torch', 'scikit-learn', 'opacus', 'scapy', 'dask']; \
+		for p in pkgs: \
+			try: print(f'  {p}=={m.version(p)}'); \
+			except m.PackageNotFoundError: print(f'  {p} (not installed)')"
