@@ -1,12 +1,39 @@
-# Byte-compiled / optimized / DLL files
+# =============================================================================
+# E3-DoH Reproducibility — .gitignore
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file is deliberately permissive about what is ignored. The artifact
+# is intended to be checked out by a reviewer who runs it on their own
+# hardware; nothing that is a byproduct of a run should end up in the
+# repository. The two exceptions are documented explicitly at the bottom of
+# each relevant section:
+#
+#   - configs/*.yaml    : configuration is committed, not ignored
+#   - expected_outputs/ : reference outputs are committed, not ignored
+#
+# Everything that a run produces goes into one of the following directories,
+# all of which are ignored:
+#
+#   data/raw/           : downloaded datasets (40 GB; never committed)
+#   data/processed/     : feature store produced by preprocess scripts
+#   outputs/            : fresh runs (tables, figures, logs)
+#   logs/               : structured JSON logs
+#   .cache/             : intermediate caches (numba, torch, HF, etc.)
+#   artifacts/          : attack simulation PCAPs and namespace state
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Python bytecode and packaging
+# -----------------------------------------------------------------------------
 __pycache__/
-*.py[codz]
+*.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -20,201 +47,373 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# PyInstaller
-#   Usually these files are written by a python script from a template
-#   before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# -----------------------------------------------------------------------------
+# Virtual environments
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+.python-version
 
-# Unit test / coverage reports
+
+# -----------------------------------------------------------------------------
+# Test and coverage artifacts
+# -----------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
 htmlcov/
 .tox/
 .nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
+.hypothesis/
 coverage.xml
 *.cover
-*.py.cover
-*.lcov
-.hypothesis/
-.pytest_cache/
-cover/
+*.py,cover
+.cache/pytest/
+nosetests.xml
+test-results/
 
-# Translations
-*.mo
-*.pot
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-# Pipfile.lock
-
-# uv
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-# uv.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-# poetry.lock
-# poetry.toml
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-# pdm.lock
-# pdm.toml
-.pdm-python
-.pdm-build/
-
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-# pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi/*
-!.pixi/config.toml
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule*
-celerybeat.pid
-
-# Redis
-*.rdb
-*.aof
-*.pid
-
-# RabbitMQ
-mnesia/
-rabbitmq/
-rabbitmq-data/
-
-# ActiveMQ
-activemq-data/
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs/Zensical documentation
-/site
-
-# mypy
+# -----------------------------------------------------------------------------
+# Type-checking and linting
+# -----------------------------------------------------------------------------
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#   and can be added to the global gitignore or merged into this file.  For a more nuclear
-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.
-# .idea/
-
-# Abstra
-#   Abstra is an AI-powered process automation framework.
-#   Ignore directories containing user credentials, local state, and settings.
-#   Learn more at https://abstra.io/docs
-.abstra/
-
-# Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore that
-#   can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, you
-#   could uncomment the following to ignore the entire vscode folder
-# .vscode/
-# Temporary file for partial code execution
-tempCodeRunnerFile.py
-
-# Ruff stuff:
 .ruff_cache/
+.pyre/
+.pytype/
+.pyright/
 
-# PyPI configuration file
-.pypirc
 
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+# -----------------------------------------------------------------------------
+# Jupyter and Colab
+# -----------------------------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*.nbconvert.ipynb
+.sage.py
+colab_uploaded_files/
+drive/
 
-# Streamlit
-.streamlit/secrets.toml
+
+# -----------------------------------------------------------------------------
+# Datasets — external, never committed
+# -----------------------------------------------------------------------------
+# The three Chapter 5 datasets are fetched by data/download_datasets.py and
+# are covered by their own licenses. See README.md §4 and STATUS.md §4.
+# The following patterns cover every path a download or extraction may use.
+
+data/raw/
+data/downloads/
+data/extracted/
+data/processed/
+data/features/
+data/*.parquet
+data/*.h5
+data/*.hdf5
+data/*.feather
+data/*.pkl
+data/*.pickle
+data/*.npy
+data/*.npz
+data/*.tar
+data/*.tar.gz
+data/*.tgz
+data/*.zip
+data/*.7z
+data/*.zst
+
+# Schema-matched synthetic fallback (data/preprocess_zenodo.py --synthetic-fallback)
+data/synthetic/
+
+
+# -----------------------------------------------------------------------------
+# Outputs — fresh runs are never committed; only expected_outputs/ is
+# -----------------------------------------------------------------------------
+# Every script writes to outputs/. The reference numbers live in
+# expected_outputs/, which IS committed. The distinction is explained in
+# REPRODUCIBILITY_CHECKLIST.md §3.
+
+outputs/
+output/
+results/
+reports/
+figures/
+plots/
+runs/
+checkpoints/
+models/
+wandb/
+mlruns/
+lightning_logs/
+
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+logs/
+*.log
+*.log.*
+log/
+*.out
+*.err
+
+
+# -----------------------------------------------------------------------------
+# Numba, PyTorch, HuggingFace, and other runtime caches
+# -----------------------------------------------------------------------------
+.cache/
+.numba_cache/
+__pycache__/numba*
+.numba_config.yaml
+*.nbi
+*.nbc
+.torch/
+torch_extensions/
+.huggingface/
+.hf_cache/
+.transformers_cache/
+.dask/
+dask-worker-space/
+*.dask
+
+
+# -----------------------------------------------------------------------------
+# Attack-simulation artifacts — PCAPs, namespace state, traffic captures
+# -----------------------------------------------------------------------------
+# These are produced by src/attacks/* and are never committed because
+# (a) they are large, (b) they may contain traffic patterns that should not
+# be distributed without review, and (c) every result that depends on them
+# is reproducible from the seeds in configs/attack_suite_params.yaml.
+
+artifacts/
+artifacts/*.pcap
+artifacts/*.pcapng
+artifacts/*.cap
+artifacts/*.netns
+pcap/
+*.pcap
+*.pcapng
+*.cap
+*.erf
+*.snoop
+
+
+# -----------------------------------------------------------------------------
+# Network-namespace scratch state (from src/attacks/*)
+# -----------------------------------------------------------------------------
+# The attack simulations create short-lived network namespaces via `ip netns`.
+# The kernel cleans these up on process exit, but if a run is killed mid-way,
+# the scratch files may linger. They are never committed.
+
+/var/run/netns/
+/run/netns/
+*.netns.lock
+
+
+# -----------------------------------------------------------------------------
+# Docker and container artifacts
+# -----------------------------------------------------------------------------
+docker-compose.override.yml
+.docker/
+docker_data/
+*.dockerfile.bak
+
+
+# -----------------------------------------------------------------------------
+# Kubernetes / Minikube (if a reviewer uses the containerised path)
+# -----------------------------------------------------------------------------
+.kube/
+minikube/
+*.kubeconfig
+helm-tmp/
+
+
+# -----------------------------------------------------------------------------
+# IDE and editor files
+# -----------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+.zed/
+.fleet/
+
+
+# -----------------------------------------------------------------------------
+# OS files
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+*.lnk
+
+
+# -----------------------------------------------------------------------------
+# Secrets and credentials — never committed, ever
+# -----------------------------------------------------------------------------
+# There should be no secrets in this artifact. If one ever appears (a
+# misconfigured download token, a stray API key), it must never be committed.
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+!tests/fixtures/*.crt
+secrets/
+credentials/
+*.token
+*.secret
+
+
+# -----------------------------------------------------------------------------
+# Paper / thesis build artifacts (if a reviewer cross-references the PDF)
+# -----------------------------------------------------------------------------
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.synctex.gz
+*.toc
+*.xdv
+
+
+# -----------------------------------------------------------------------------
+# Large binary blobs and archives generally
+# -----------------------------------------------------------------------------
+*.bin
+*.dat
+*.iso
+*.img
+*.vmdk
+*.ova
+
+
+# -----------------------------------------------------------------------------
+# Temporary files
+# -----------------------------------------------------------------------------
+tmp/
+temp/
+.tmp/
+*.tmp
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+
+# =============================================================================
+# DELIBERATE NON-IGNORES — these MUST remain committed
+# =============================================================================
+#
+# The following are explicitly NOT ignored. If any of them appears in a
+# git status output after a run, that is a signal that something is wrong
+# with the run, not that the .gitignore is wrong.
+#
+#   configs/*.yaml          : every configuration file is committed
+#   configs/schema.json     : config schema, committed
+#   expected_outputs/*.json : reference values, committed
+#   expected_outputs/*.csv  : reference values, committed
+#   expected_outputs/*.png  : reference figures, committed
+#   expected_outputs/*.svg  : reference figures, committed
+#   expected_outputs/MANIFEST.sha256 : committed
+#   expected_outputs/verification_script.py : committed
+#   data/attack_matrix.csv  : the 15-scenario attack corpus, committed
+#   data/download_datasets.py : committed
+#   tests/fixtures/*        : small test fixtures, committed
+#   scripts/**              : committed
+#   src/**                  : committed
+#
+# The negation patterns below are belt-and-braces: they make the intent
+# explicit and prevent a broad ignore from accidentally swallowing a
+# committed file.
+
+!configs/
+!configs/*.yaml
+!configs/schema.json
+!expected_outputs/
+!expected_outputs/*.json
+!expected_outputs/*.csv
+!expected_outputs/*.png
+!expected_outputs/*.svg
+!expected_outputs/MANIFEST.sha256
+!expected_outputs/verification_script.py
+!data/
+!data/attack_matrix.csv
+!data/download_datasets.py
+!data/data_utils.py
+!data/preprocess_zenodo.py
+!data/preprocess_pcap.py
+!src/
+!src/**/*.py
+!scripts/
+!scripts/**/*.py
+!scripts/**/*.sh
+!tests/
+!tests/**/*.py
+!tests/fixtures/
+!tests/fixtures/*
+!README.md
+!STATUS.md
+!REPRODUCIBILITY_CHECKLIST.md
+!LICENSE
+!requirements.txt
+!requirements-dev.txt
+!Dockerfile
+!setup.py
+
+
+# =============================================================================
+# Notes on large file handling
+# =============================================================================
+#
+# The following classes of file will never be committed to this repository:
+#
+#   - The three external datasets (DS-1, DS-2, DS-3; see STATUS.md §4).
+#     Combined these are ~40 GB. They are fetched by data/download_datasets.py
+#     with SHA-256 verification against a committed manifest.
+#
+#   - Any PCAP produced by an attack simulation. These are byproducts, not
+#     reference data; every result that depends on them is reproducible from
+#     configs/attack_suite_params.yaml.
+#
+#   - Any file larger than 50 MB, by GitHub's soft limit. The expected
+#     outputs are all under 5 MB in total (the two PNG figures dominate).
+#     If a future artifact addition needs a larger committed binary, use
+#     Git LFS via .gitattributes, not a .gitignore exception.
+#
+# =============================================================================
