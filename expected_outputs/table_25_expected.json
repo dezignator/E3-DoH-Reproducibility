@@ -1,0 +1,44 @@
+{
+  "table": "table_25",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 25 (p.145) of the thesis",
+  "note": "The ε column reports the realized privacy loss under each configuration's calibration. It is NOT the target budget for the main detection experiments (ε=1.2). Each row is a distinct experimental configuration, not a variant of one system; the values are not comparable across rows and do not form a monotone privacy-utility curve (thesis Table 25 note, p.145). See fl_dp_params.yaml §3 and §9.",
+  "rows": {
+    "reference_configuration": {
+      "epsilon_realized": 0.72,
+      "accuracy_drop_pp": 0.8,
+      "adversarial_robustness_pct": 98.3,
+      "communication_mb_per_round": 45.7
+    },
+    "compromised_clients": {
+      "epsilon_realized": 0.81,
+      "accuracy_drop_pp": 3.2,
+      "adversarial_robustness_pct": 96.1,
+      "communication_mb_per_round": 48.2
+    },
+    "differential_privacy": {
+      "epsilon_realized": 0.68,
+      "accuracy_drop_pp": 1.5,
+      "adversarial_robustness_pct": 97.4,
+      "communication_mb_per_round": 46.8
+    },
+    "homomorphic_aggregation": {
+      "epsilon_realized": 0.31,
+      "accuracy_drop_pp": 2.1,
+      "adversarial_robustness_pct": 99.0,
+      "communication_mb_per_round": 82.4
+    },
+    "adaptive_clipping": {
+      "epsilon_realized": 0.59,
+      "accuracy_drop_pp": 1.1,
+      "adversarial_robustness_pct": 98.7,
+      "communication_mb_per_round": 44.3
+    }
+  },
+  "tolerances": {
+    "epsilon_realized": 0.0,
+    "accuracy_drop_pp": 0.05,
+    "adversarial_robustness_pct": 0.3,
+    "communication_mb_per_round": 1.0
+  }
+}
