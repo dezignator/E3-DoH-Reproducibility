@@ -1,0 +1,74 @@
+# =============================================================================
+# E3-DoH Reproducibility — pre-commit configuration
+# =============================================================================
+#
+# Optional. Run `pre-commit install` once per checkout, then
+# `pre-commit run --all-files` (or just `git commit`) to run the hooks.
+#
+# The hooks are deliberately small:
+#   - standard pre-commit-hooks (trailing whitespace, EOF, YAML/JSON,
+#     merge-conflict markers, large files)
+#   - ruff (check only; version matches requirements-dev.txt)
+#   - black (format; version matches requirements-dev.txt)
+#
+# The expected_outputs/ directory is excluded from every hook because
+# its files are generated reference data, not hand-edited source.
+# Editing them by hand is a defect (the generator should be re-run
+# instead).
+#
+# Nothing here modifies the repository on its own; the hooks only fix
+# files when a violation is found, and only on the files the reviewer
+# staged.
+
+repos:
+  # --- Standard pre-commit hooks -------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^expected_outputs/
+      - id: end-of-file-fixer
+        exclude: ^expected_outputs/
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=2000"]
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # --- Linting --------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.2
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        exclude: ^expected_outputs/
+
+  # --- Formatting -----------------------------------------------------------
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 24.2.0
+    hooks:
+      - id: black
+        exclude: ^(expected_outputs/|data/attack_matrix\.csv)
+
+# =============================================================================
+# Notes
+# =============================================================================
+#
+# - The `rev` values must match the pinned versions in
+#   requirements-dev.txt (ruff==0.3.2, black==24.2.0). When bumping
+#   either, bump the corresponding `rev` here in the same commit.
+#
+# - `--maxkb=2000` on check-added-large-files is the same 2 MB
+#   threshold the .gitignore's "large file handling" note references.
+#   Any file over 50 MB must go through Git LFS; files over 2 MB are
+#   flagged here as a reminder before the .gitignore rule would
+#   silently accept them.
+#
+# - `mixed-line-ending --fix=lf` matches .gitattributes' `* text=auto
+#   eol=lf` rule. Together they ensure a checkout on Windows does not
+#   introduce CRLF into the repository.
