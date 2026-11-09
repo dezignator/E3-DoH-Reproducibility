@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 dezignator
+Copyright (c) 2026 The E3-DoH Reproducibility Artifact Authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,77 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+===============================================================================
+DEFENSIVE-RESEARCH RIDER — ATTACK-SIMULATION MODULES
+===============================================================================
+
+This rider applies to the following modules and to any derivative work that
+reuses, copies, or modifies them:
+
+    src/attacks/dns_tunneling.py
+    src/attacks/timing_side_channel.py
+    src/attacks/quic_congestion.py
+    src/attacks/cert_injection.py
+    src/attacks/padding_oracle.py
+    and the associated data file:
+    data/attack_matrix.csv
+
+These modules exist solely to support the reproducibility and independent
+verification of the defensive results reported in Chapter 5 of the thesis
+"Next-Generation Secure Encrypted DNS Architectures: Four Complementary
+Frameworks for Adaptive, Privacy-Preserving, and Quantum-Resilient Defense."
+They simulate attack techniques inside an isolated network namespace so that
+a reviewer can verify that the detection and mitigation mechanisms described
+in the thesis fire as claimed.
+
+By using, copying, modifying, or distributing these modules, you agree to
+the following conditions:
+
+  1. Permitted use. These modules may be used only for defensive security
+     research, academic reproducibility, and controlled testing on systems
+     and networks that you own or have explicit written authorization to
+     test. "Authorization" means authorization from the party that owns or
+     operates the system, and, where required, from the relevant institutional
+     review board or equivalent authority.
+
+  2. Prohibited use. These modules must not be used, in whole or in part,
+     against any system or network that you do not own or have explicit
+     written authorization to test. They must not be used to develop,
+     distribute, or operate offensive tooling. They must not be used in any
+     manner that violates applicable law in your jurisdiction.
+
+  3. Isolation requirement. The modules are designed to run inside an
+     isolated network namespace (see configs/attack_suite_params.yaml,
+     key `isolation`). The isolation must not be disabled when the modules
+     are executed. Disabling isolation shifts the responsibility for any
+     resulting traffic entirely onto the party that disabled it.
+
+  4. No warranty. The modules are provided "as is", under the same warranty
+     disclaimer as the base license above. The authors accept no liability
+     for any direct, indirect, incidental, special, exemplary, or
+     consequential damages arising from the use or misuse of these modules.
+
+  5. Attribution. Any academic publication that uses these modules must cite
+     the thesis. The citation is given in the repository's README.md §14.
+
+  6. Severability. If any provision of this rider is held unenforceable, the
+     remaining provisions remain in full force and effect. The base MIT
+     license above continues to apply to every module of the artifact that
+     is not listed at the top of this rider.
+
+Nothing in this rider is intended to restrict the rights granted to you under
+the base MIT license for the rest of the artifact. The rider is an additional
+condition on the attack-simulation modules only.
+
+===============================================================================
+DATASET LICENSING NOTICE
+===============================================================================
+
+The artifact does not redistribute any dataset. The three external datasets
+used by Chapter 5 (DS-1, DS-2, DS-3; see STATUS.md §4 and README.md §4) are
+each governed by their own license and terms of use. Users of this artifact
+must comply with those licenses when downloading and using the datasets.
+Fetching the datasets is done by data/download_datasets.py, which verifies a
+SHA-256 hash for each archive against a committed manifest before the data is
+used.
