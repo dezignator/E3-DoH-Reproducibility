@@ -1,0 +1,40 @@
+# =============================================================================
+# E3-DoH Reproducibility — SHA-256 Manifest of expected_outputs/
+# =============================================================================
+#
+# This file records the SHA-256 of every committed file in
+# expected_outputs/. It is used by verification_script.py for the
+# file-integrity check.
+#
+# The entries below are `<TO_BE_POPULATED>` until the first successful
+# full-reproduction run. To populate:
+#
+#     python scripts/generate_manifest.py \
+#         --outputs expected_outputs/ \
+#         --manifest expected_outputs/MANIFEST.sha256
+#
+# That script is delivered later in the sequence. Until then, the
+# verification_script.py reports "manifest SKIP" (not FAIL) because the
+# entries are placeholders. This is documented in STATUS.md §9
+# (ISSUE-01).
+#
+# Format (standard sha256sum):
+#     <64-hex-digest>  <relative-path>
+#
+# A reviewer who has run the full reproduction should regenerate this
+# file and commit it in the same commit as the expected_outputs/ JSON
+# files. The file-integrity check is not a substitute for the
+# value-based verification (the verification_script.py comparators);
+# it is an additional check that the committed reference files have
+# not been hand-edited after the sign-off.
+#
+# =============================================================================
+
+<TO_BE_POPULATED>  expected_outputs/table_18_expected.json
+<TO_BE_POPULATED>  expected_outputs/table_19_expected.json
+<TO_BE_POPULATED>  expected_outputs/table_20_expected.json
+<TO_BE_POPULATED>  expected_outputs/table_25_expected.json
+<TO_BE_POPULATED>  expected_outputs/table_26_expected.json
+<TO_BE_POPULATED>  expected_outputs/figure_11_expected.svg
+<TO_BE_POPULATED>  expected_outputs/figure_12_expected.csv
+<TO_BE_POPULATED>  expected_outputs/figure_13_expected.csv
