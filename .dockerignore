@@ -1,0 +1,113 @@
+# =============================================================================
+# E3-DoH Reproducibility — Docker Build Context Exclusions
+# =============================================================================
+#
+# This file tells `docker build` what to exclude from the build context
+# (the initial `tar` of the project directory that is sent to the
+# Docker daemon). Excluding datasets, run outputs, caches, and the .git
+# directory keeps the context small (a few MB instead of ~40 GB) and
+# lets Docker cache the layers that depend on source files.
+#
+# See Dockerfile for the corresponding COPY directives. Files listed
+# here are not sent to the daemon in the first place; files not listed
+# here but also not COPY'd still inflate the initial context, so they
+# are excluded here as well.
+
+# -----------------------------------------------------------------------------
+# Git, IDE, and CI
+# -----------------------------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+.github/
+.pre-commit-config.yaml
+.idea/
+.vscode/
+
+# -----------------------------------------------------------------------------
+# Python bytecode and caches
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.numba_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# -----------------------------------------------------------------------------
+# Virtual environments
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+
+# -----------------------------------------------------------------------------
+# Datasets — never in the build context
+# -----------------------------------------------------------------------------
+data/raw/
+data/downloads/
+data/processed/
+data/synthetic/
+data/extracted/
+data/*.parquet
+data/*.tar
+data/*.tar.gz
+data/*.tgz
+data/*.zip
+
+# -----------------------------------------------------------------------------
+# Run outputs — generated inside the container
+# -----------------------------------------------------------------------------
+outputs/
+artifacts/
+logs/
+*.log
+
+# -----------------------------------------------------------------------------
+# Secrets and credentials
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# -----------------------------------------------------------------------------
+# OS
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------------------------------------------------------
+# Keep these (they are needed at build time and runtime):
+# -----------------------------------------------------------------------------
+# configs/
+# src/
+# scripts/
+# tests/
+# expected_outputs/
+# data/attack_matrix.csv
+# data/data_utils.py
+# data/download_datasets.py
+# data/preprocess_*.py
+# data/__init__.py
+# data/MANIFEST_DATASETS.sha256
+# requirements.txt
+# setup.py
+# Dockerfile
+# Makefile
+# README.md
+# STATUS.md
+# LICENSE
+# REPRODUCIBILITY_CHECKLIST.md
+# =============================================================================
