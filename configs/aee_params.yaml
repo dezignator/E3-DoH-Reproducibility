@@ -1,0 +1,611 @@
+# =============================================================================
+# E3-DoH Reproducibility — Adaptive Evolutionary Encryption (AEE) Parameters
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file holds every parameter of the Adaptive Evolutionary Encryption
+# component. AEE is the Module-LWE key-encapsulation layer whose key
+# schedule evolves from the observed traffic entropy (thesis §5.2). The
+# *formal* security argument for AEE is limited to the KEM-combiner
+# proposition of thesis §5.2.6; the key-evolution schedule itself is a
+# heuristic construction with no IND-CCA2 proof (thesis §5.2.5, final
+# paragraph). This artifact reflects that boundary: the parameters below
+# are the ones under which the reported results were produced, and the
+# security note at §10 records what is and is not claimed.
+#
+# Equation references throughout point at the thesis (page numbers refer
+# to the PDF version of the thesis as archived at the time of writing).
+#
+# Sibling files:
+#   default_e3_config.yaml     — master config, includes this file by reference
+#   qhe_params.yaml            — Ring-LWE parameters for the homomorphic layer
+#   riemannian_metrics.yaml    — protocol-specific metric tensors
+#   fl_dp_params.yaml          — federated learning DP parameters
+#   sandbox_mdp_params.yaml    — AMPS sandbox control parameters
+#   attack_suite_params.yaml   — per-attack rate, duration, target
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Metadata
+# -----------------------------------------------------------------------------
+# Identifies which framework and which version of the artifact these
+# parameters belong to. Recorded in the run header so that a result can
+# be traced back to the exact parameter set that produced it.
+
+metadata:
+  framework: "E3-DoH"
+  component: "AEE"
+  component_full_name: "Adaptive Evolutionary Encryption"
+  artifact_version: "1.0.0"
+  thesis_section: "5.2"
+  thesis_page_anchor: "p.120-124"
+  # The two layers that AEE provides, cited separately because they are
+  # argued separately in the thesis:
+  #   - the key-encapsulation layer (Module-LWE, IND-CCA2 via KEM combiner)
+  #   - the key-evolution schedule (heuristic, no formal security claim)
+  security_argument_layers:
+    - "key_encapsulation"
+    - "key_evolution_schedule"
+  # Layers for which a formal reduction exists (see §10 for the boundary).
+  formal_reduction_layers:
+    - "key_encapsulation"
+
+
+# -----------------------------------------------------------------------------
+# 2. Lattice parameters (Module-LWE)
+# -----------------------------------------------------------------------------
+# AEE uses the Module-LWE problem (thesis §5.2.1, p.121). Module-LWE was
+# preferred over generic LWE because the module structure supports
+# efficient polynomial operations and admits practical parameter choices
+# while remaining covered by the NIST standardization process (thesis
+# §1.6.3, p.33).
+#
+# The lattice is defined over the ring R_q = Z_q[x] / (x^n + 1) with
+#   n = 1024 (ring dimension, held fixed — see §2.3 for why n is fixed)
+#   q ≈ 2^32 (modulus, in the adaptive-modulation range of §6 below)
+#
+# Eq. 68 in the thesis (p.121) defines the lattice L over this ring.
+# Eq. 69 (p.121) and Eq. 73 (p.123) define the key-evolution recurrence.
+# The SDE form is Eq. 70 / Eq. 72 (p.121-123).
+#
+# Section 5.2.4 (p.122) is the authoritative description of the Module-LWE
+# construction. The parameter names below match that section.
+
+lattice:
+  # Ring definition.
+  ring:
+    polynomial: "x^n + 1"        # cyclotomic polynomial, standard for ring-LWE
+    n: 1024                       # ring dimension (fixed; see §2.3)
+    # q is specified in §2.1 (baseline) and can be modulated within the
+    # range given in §6 (adaptive modulation). The baseline value below
+    # is the value used unless the modulation policy of §6 raises it.
+    q_baseline: 4294967296        # 2^32, as stated in thesis §5.2.1 (p.121)
+    q_bits: 32                    # log2(q_baseline)
+
+  # Module structure (thesis §5.2.4, p.122). The module rank k is the
+  # third lattice dimension. It is *not* the same as n: n is the ring
+  # dimension, k is the number of ring elements in the module. The thesis
+  # explicitly states that k may be varied to adapt the security level
+  # without changing the ring structure (§5.2.4, final paragraph), which
+  # is what the modulation policy of §6 exploits.
+  module:
+    k_baseline: 3                 # module rank; matches the Kyber-1024 family
+    k_min: 2                      # lower bound under the modulation policy of §6
+    k_max: 4                      # upper bound under the modulation policy of §6
+
+  # Secret and error distributions (thesis §5.2.4, p.122). The secret s
+  # and the error e are sampled from a centred discrete Gaussian. The
+  # standard deviation sigma_err is the width of that Gaussian. The
+  # thesis does not state a specific sigma_err value in the body text;
+  # the value below is the one the artifact uses and was calibrated
+  # against the lattice-estimator target in §2.2.
+  distribution:
+    family: "centred_discrete_gaussian"
+    sigma_err: 3.19               # standard deviation of the error distribution
+    sigma_err_min: 2.83           # lower bound under modulation (§6)
+    sigma_err_max: 3.19           # upper bound under modulation (§6)
+    # The sampling method. Thesis §5.2.4 refers to the standard
+    # learning-with-errors literature; the artifact uses the Ziggurat
+    # rejection sampler from qhe_params.yaml §4, reused here so that the
+    # AEE and QHE layers share a single sampling implementation.
+    sampler: "ziggurat"           # see qhe_params.yaml §4 for the Ziggurat tables
+
+  # Security target. The thesis does not report a specific security
+  # level for AEE n=1024 in the body text (the level is computed and
+  # recorded in the reproducibility artifact, per §5.3.6 p.127). The
+  # target below is the value the artifact's security-estimator sweep
+  # aims for, and it is the value that a reviewer should see when they
+  # run scripts/reproduce_tables/table_26_multiprotocol_performance.py
+  # with --verify-security.
+  security:
+    target_level_bits: 128        # conservative post-quantum target
+    estimator: "lattice-estimator" # the standard methodology named in §5.3.6
+    estimator_version: "0.1.0"    # pinned; the SHA-256 is in STATUS.md §7
+    # The estimated level is recorded in expected_outputs/aee_security_estimate.json
+    # after the first full run. It is a conjecture under the hardness of
+    # Module-LWE, not a theorem (thesis §5.3.6, p.127).
+
+
+# -----------------------------------------------------------------------------
+# 3. Key-evolution recurrence (Eq. 69 and Eq. 73)
+# -----------------------------------------------------------------------------
+# The key evolves according to a recurrence driven by the traffic entropy
+# (Eq. 71) and a learnable sigmoidal activation. The recurrence and its
+# SDE form are stated in thesis §5.2.5 (p.122-123).
+#
+# Eq. 69 / Eq. 73 in the thesis:
+#
+#     K_{t+1} = ( W_g . sigma( K_t (+) H(tau_{[t-dt:t]}) ) + b_g ) mod q
+#
+# where:
+#   K_t        : the current encryption key matrix (n x n over Z_q)
+#   H(.)       : the Shannon-entropy functional of Eq. 71, see §4 below
+#   sigma(.)   : sigmoidal activation with adaptive parameters (beta, gamma)
+#   (+)        : tensor Kronecker sum
+#   W_g, b_g   : learned weights and biases
+#   mod q      : modular reduction (kept below q_baseline unless §6 raises it)
+#
+# IMPORTANT (thesis §5.2.5, p.123): an earlier draft of the thesis used a
+# ReLU activation here. It was removed because ReLU clips all negative
+# values to zero, which reduces the effective number of distinct keys in
+# the key space. The current file uses the sigmoidal activation, and the
+# comment is preserved so that a reviewer who sees a ReLU in an older
+# draft can tell why it was replaced. Do not reintroduce ReLU.
+#
+# IMPORTANT (thesis §5.2.5, p.123): "no formal security proof [is] given
+# for the schedule". This is not an oversight; it is stated in the thesis
+# and is recorded again in §10 of this file. The key schedule is designed
+# so that "the key trajectory [is] dependent on the observed traffic
+# entropy in a manner that would be hard for an adversary to predict"
+# (§5.2.5, p.123). That is an empirical property, not a proven one.
+
+key_evolution:
+  # Activation function (sigma in Eq. 69 / Eq. 73).
+  activation:
+    family: "sigmoid"
+    # Adaptive parameters (thesis §5.2.2, p.121; Eq. 69).
+    beta_init: 1.0                # initial beta; learned during training
+    gamma_init: 0.0               # initial gamma; learned during training
+    beta_range: [0.5, 2.0]        # bounded to prevent degenerate behaviour
+    gamma_range: [-1.0, 1.0]
+
+  # Recurrence weights (W_g, b_g in Eq. 69 / Eq. 73). These are learned
+  # during the training phase described in §7 below. The init values are
+  # the ones used at the start of every run; the trained values are
+  # written to outputs/checkpoints/ and are not committed to the
+  # repository (they are 1024x1024 matrices; see .gitignore).
+  weights:
+    init_family: "xavier_uniform"  # standard for sigmoid activations
+    init_seed_offset: 0            # run seed + 0 (see default_e3_config.yaml §2)
+    # Whether to freeze the trained weights after the training phase, or
+    # continue to adapt them in the inference phase. The thesis does not
+    # state which; the artifact defaults to freezing, because continued
+    # adaptation would break the byte-level comparison in Figure 11.
+    freeze_after_training: true
+
+  # Kronecker sum step. The (+) operator in Eq. 69 is a tensor Kronecker
+  # sum: it combines the current key K_t with the entropy scalar H(tau)
+  # into an n x n matrix. The step_size below is the rate at which the
+  # entropy scalar is folded in. It is calibrated against the
+  # per-protocol rotation cadence in §8.
+  kronecker_step: 0.1
+
+
+# -----------------------------------------------------------------------------
+# 4. Entropy functional (Eq. 71)
+# -----------------------------------------------------------------------------
+# The traffic-entropy functional H(tau_{[t-dt:t]}) is defined in thesis
+# §5.2.5 (Eq. 71, p.122):
+#
+#     H(tau_{[t-dt:t]}) = - sum_q p(q) log p(q)
+#
+# where q iterates over the observed query types in the sliding window
+# [t-dt, t], and p(q) is the empirical probability of query type q in
+# that window. The window length dt is controlled by the detection
+# pipeline (configs/default_e3_config.yaml §6, `window_seconds: 30`),
+# not by this file — the AEE layer consumes H(.) as an input, it does
+# not compute the window.
+
+entropy_functional:
+  # The functional family. "shannon" is the value used in the thesis
+  # (§5.2.5, p.122: "the Shannon entropy of the distribution of query
+  # types"). Rényi and Tsallis are supported by src/utils/math_utils.py
+  # for the AMPS sandbox layer (sandbox_mdp_params.yaml §3) but are NOT
+  # used by AEE. Do not switch this to Rényi without re-running the
+  # calibration in §8 — the two functionals give different H(.) traces
+  # and therefore different key trajectories.
+  family: "shannon"
+
+  # Query-type vocabulary. The entropy is computed over the distribution
+  # of DNS query types observed in the window (A, AAAA, MX, TXT, CNAME,
+  # etc). The vocabulary is fixed to match the CIC-DoH / Zenodo corpus
+  # taxonomy; adding a query type not in the corpus would produce a zero
+  # probability for that type and slightly depress the entropy, which
+  # would shift the key trajectory.
+  query_types:
+    - "A"
+    - "AAAA"
+    - "CNAME"
+    - "MX"
+    - "TXT"
+    - "NS"
+    - "SOA"
+    - "PTR"
+    - "SRV"
+    - "OTHER"                    # catch-all for the rarer types
+
+  # Numerical floor. When a query type has zero probability in the
+  # window (because it simply did not appear), the p log p term is taken
+  # to be zero by convention, not log(0). The floor below is applied to
+  # the probability before the log to avoid -inf in floating point.
+  probability_floor: 1.0e-9
+
+  # Normalisation. Raw Shannon entropy over the 10-type vocabulary has
+  # a maximum of log2(10) ≈ 3.32 bits. The value below normalises H(.)
+  # to [0, 1] before it is fed into the Kronecker sum, so that the
+  # kronecker_step of §3 is in the same units as the sigmoid's output
+  # range. The thesis does not state whether the reported results used
+  # normalised or unnormalised entropy; the artifact normalises, and the
+  # expected outputs in expected_outputs/ reflect that choice.
+  normalise: true
+  normalise_max_bits: 3.321928    # log2(10)
+
+
+# -----------------------------------------------------------------------------
+# 5. Stochastic differential equation (Eq. 70 / Eq. 72)
+# -----------------------------------------------------------------------------
+# The key evolution is stated in SDE form in thesis §5.2.3 (Eq. 70, p.121)
+# and again in §5.2.5 (Eq. 72, p.123):
+#
+#     dK/dt = alpha . grad_K L_security
+#           + beta  . H(K, tau)
+#           + gamma . W(t) . sin( 2*pi*t / T_rotation )
+#
+# where:
+#   L_security      : the security-loss functional (negative log attack
+#                     success probability, §5.2.3 p.121)
+#   H(K, tau)       : the traffic-adaptive Hamiltonian (§5.2.3 p.121)
+#   W(t)            : a Wiener process modelling quantum-attack uncertainty
+#   T_rotation      : the rotation cadence (see §8 below)
+#   alpha, beta, gamma : adaptive learning rates constrained so that
+#                        alpha^2 + beta^2 + gamma^2 = 1 (§5.2.3 p.122)
+#
+# The constraint alpha^2 + beta^2 + gamma^2 = 1 is the single most
+# important line in this file. It keeps the total weight on the three
+# terms constant as the training proceeds; if it is violated, the key
+# trajectory becomes unbounded and the security-loss term can be
+# drowned out by the Wiener term. src/utils/math_utils.py enforces it
+# with an assertion at every step. Do not remove the assertion.
+
+sde:
+  # Learning-rate triple. These are the initial values; the training
+  # procedure of §7 keeps them on the simplex alpha^2 + beta^2 + gamma^2 = 1.
+  alpha_init: 0.6                 # weight on the security-loss gradient
+  beta_init: 0.6                  # weight on the traffic-adaptive Hamiltonian
+  gamma_init: 0.529               # weight on the Wiener term (0.6^2 + 0.6^2 + 0.529^2 ≈ 1.0)
+  # Note on the arithmetic: 0.6^2 + 0.6^2 + 0.529^2 = 0.36 + 0.36 + 0.279841
+  # = 0.999841, which is within 2e-4 of 1.0. The small deficit is absorbed
+  # by the renormalisation step below, not by rounding the coefficients.
+
+  # Re-normalisation step. After each gradient update to (alpha, beta,
+  # gamma), the triple is projected back onto the unit sphere so that the
+  # constraint is exactly satisfied. Projecting is preferable to
+  # re-normalising by division because it preserves the *ratios* of the
+  # three weights, whereas division would not.
+  project_onto_simplex: true
+  simplex_tolerance: 1.0e-6
+
+  # Wiener process. The Wiener term models "quantum attack uncertainty"
+  # (thesis §5.2.3, p.121). The magnitude is set by gamma (above) and
+  # the increment is drawn from a standard normal with the variance
+  # below. The Wiener increment is regenerated on every SDE step, not
+  # cached, because caching would make the trajectory predictable.
+  wiener:
+    variance: 1.0                 # standard Wiener process: Var(dW) = dt
+    dt: 1.0e-3                    # SDE step size, in seconds of traffic time
+    # The seed for the Wiener process is derived from the run seed
+    # (default_e3_config.yaml §2). Do NOT hard-code a seed here — that
+    # would make the trajectory predictable across runs, which is the
+    # exact opposite of what the Wiener term is for.
+    seed_source: "runtime.seed"
+
+  # T_rotation (the rotation cadence). See §8 for the per-protocol
+  # values. The value here is the *default* used when a protocol is not
+  # specified (e.g. during the initial calibration phase before a
+  # protocol has been assigned). It is not used in the per-protocol
+  # evaluation that produces Table 26.
+  default_rotation_seconds: 10.0   # matches the "10 s" in thesis Table 27 (p.163)
+
+  # Diffusion coefficient. The thesis (§5.2.3, p.121) uses a gamma that
+  # is constrained to be positive; the artifact enforces a stricter
+  # floor, gamma_min below, following the same design principle as
+  # Chapter 3's discussion of not annealing the diffusion to zero
+  # (thesis §3.11.2, p.69). A diffusion that vanished with time would
+  # make the key trajectory progressively predictable.
+  diffusion:
+    floor: 1.0e-3                 # gamma is never allowed below this
+    ceiling: 1.0                  # gamma is never allowed above this
+
+
+# -----------------------------------------------------------------------------
+# 6. Adaptive parameter modulation (thesis §5.2.3)
+# -----------------------------------------------------------------------------
+# Thesis §5.2.3 (p.122) states that "the adaptive part of the encryption
+# scheme was implemented using a parameter modulation mechanism which
+# varied the width of error distribution, the magnitude of the modulus
+# and the dimension of the lattice, based on the measurements of traffic
+# entropy and adversarial indicators."
+#
+# Section 5.2.4 (p.122, final paragraph) states that the module rank k
+# is the primary variable: "A varying k value was also allowed for to
+# enable the security level to be adapted to suit changing needs without
+# changing the underlying ring structure."
+#
+# This file reconciles the two: the module rank k is the primary
+# modulation variable (matching the §5.2.4 statement), and sigma_err and
+# q are modulated within narrow bounds (matching the §5.2.3 statement).
+# The ring dimension n is NOT modulated — it is held at 1024 — because
+# changing n would change the ring structure, contradicting §5.2.4.
+
+modulation:
+  # Whether modulation is active. Set to false only for the calibration
+  # run that produces the baseline; leave it true for every other run.
+  enabled: true
+
+  # Modulation is triggered when the observed traffic entropy H(tau)
+  # exceeds the threshold below, or when the anomaly detector reports an
+  # adversarial indicator. The threshold is in normalised units (§4).
+  entropy_trigger: 0.85
+  # Entropy thresholds below which the system stays at the baseline.
+  entropy_safe: 0.55
+
+  # The three-step policy. Each step raises (k, q, sigma_err) to the
+  # values specified. The policy is monotone: once a step is entered it
+  # is not exited until the entropy falls below `entropy_safe` for a
+  # consecutive number of windows specified by `downgrade_patience`.
+  steps:
+    - name: "baseline"
+      k: 3
+      q_bits: 32
+      sigma_err: 3.19
+    - name: "elevated"
+      k: 4
+      q_bits: 33
+      sigma_err: 3.19
+    - name: "high"
+      k: 4
+      q_bits: 34
+      sigma_err: 2.83             # narrower error distribution = higher security
+    # Note on the q_bits progression: q is the modulus, and 2^32, 2^33,
+    # 2^34 are the practical bounds before the cost of the module
+    # operations exceeds the budget of the 42-45 microsecond target
+    # (§8 below). Raising q beyond 34 bits is possible but would break
+    # the latency target.
+
+  # Downgrade protection. Even if the entropy falls, the policy will
+  # not go back below "elevated" once "high" has been entered, unless
+  # the system has been in the "high" step for at least the number of
+  # windows specified below. This is an analogue of the "policy can
+  # raise the level of a shard but never select a configuration weaker
+  # than Pi_0" rule from Chapter 3 (thesis §3.7.2, p.64); the design
+  # principle — an adversary who influences the trigger must not be
+  # able to force a downgrade below the baseline — carries over.
+  downgrade_patience_windows: 10
+
+
+# -----------------------------------------------------------------------------
+# 7. Training procedure
+# -----------------------------------------------------------------------------
+# The key-evolution weights (W_g, b_g) are trained on a benign split
+# before the AEE engine is evaluated on the test split. The training
+# procedure is a standard supervised step: the loss is the negative log
+# likelihood of the security-loss functional (§5.2.3, p.121), and the
+# gradient is taken through the recurrence of §3.
+
+training:
+  epochs: 50
+  batch_size: 256
+  learning_rate: 1.0e-3
+  learning_rate_schedule: "cosine"     # cosine decay to lr_min over the epochs
+  lr_min: 1.0e-5
+  optimizer: "adamw"
+  weight_decay: 1.0e-4
+
+  # Gradient clipping. The SDE's Wiener term can produce large gradients
+  # on the security-loss path; clipping prevents a single noisy window
+  # from destabilising the whole weight matrix.
+  gradient_clip_norm: 1.0
+
+  # Early stopping. Training stops when the validation loss has not
+  # improved for `patience` consecutive epochs. This is what prevents the
+  # key-evolution from overfitting to the benign split and becoming
+  # predictable on the test split.
+  early_stopping:
+    enabled: true
+    patience: 5
+    min_delta: 1.0e-4
+
+  # Validation split. The training uses 80% of the benign split for
+  # training and 20% for validation. The split is stratified by query
+  # type (§4) so that every type appears in both halves.
+  validation_fraction: 0.2
+  stratified_by: "query_type"
+
+
+# -----------------------------------------------------------------------------
+# 8. Per-protocol rotation cadence (Table 26 reference values)
+# -----------------------------------------------------------------------------
+# The thesis reports a per-protocol AEE parameter-update time in Table 26
+# (p.148): DoH 42 μs, DoT 38 μs, DoQ 45 μs. These are *latency* figures,
+# not the wall-clock rotation interval (which is the 10 s of §5). The two
+# are often conflated; this block records both, and marks which is which.
+#
+# The AEE parameter-update time is the time to compute one key-rotation
+# step given the current traffic state. It is a property of the engine,
+# not a tunable. The values below are the reference targets; the
+# verification script compares the fresh run against them.
+
+per_protocol:
+  doh:
+    parameter_update_time_us: 42.0     # Table 26, thesis p.148
+    tolerance_us: 1.0                  # tight; see REPRODUCIBILITY_CHECKLIST.md §5
+    rotation_interval_seconds: 10.0    # wall-clock rotation (Table 27, p.163)
+    # The DoH metric tensor (lambda, alpha) is in riemannian_metrics.yaml;
+    # it is not duplicated here.
+
+  dot:
+    parameter_update_time_us: 38.0     # Table 26, thesis p.148
+    tolerance_us: 1.0
+    rotation_interval_seconds: 10.0
+    # DoT is fastest because the TLS 1.3 record layer gives the AEE engine
+    # a clean record boundary at which to rotate (§5.4.4). The difference
+    # between 38 and 42 μs (4 μs, the tightest gap in Table 26) is a
+    # consequence of the transport, not a tuning choice.
+
+  doq:
+    parameter_update_time_us: 45.0     # Table 26, thesis p.148
+    tolerance_us: 1.0
+    rotation_interval_seconds: 10.0
+    # DoQ is slowest because the QUIC stream-multiplexing layer gives the
+    # AEE engine a less predictable per-query boundary (§5.4.5).
+
+# Note (thesis Table 26, p.148, under "Best Observed"): DoT reports the
+# most favourable value on the AEE parameter-update time row. The
+# artifact reports this as a per-protocol figure, not as a claim that DoT
+# is the superior protocol overall. See REPRODUCIBILITY_CHECKLIST.md §4
+# for the interpretation of a per-row "best" value.
+
+
+# -----------------------------------------------------------------------------
+# 9. Post-quantum stack share (Table 26 reference values)
+# -----------------------------------------------------------------------------
+# Table 26 (p.148) reports a "post-quantum stack share" for each protocol:
+# DoH 98.9%, DoT 99.1%, DoQ 97.8%. The thesis note under the table is
+# explicit that this is "a configuration descriptor, not a measure of the
+# hardness of the underlying primitives, and the small differences between
+# protocols should not be read as a security ranking."
+#
+# The block below records the reference values so that a reviewer can see
+# them without opening the thesis, and reiterates the note so that the
+# configuration descriptor is not mistaken for a security ranking. The
+# artifact does not produce a "share" figure at runtime — it is a
+# property of the cryptographic configuration, not of the run — and the
+# verification script simply checks that the configuration described in
+# this file is the one that produced the reported shares.
+
+post_quantum_stack_share:
+  doh: 98.9
+  dot: 99.1
+  doq: 97.8
+  tolerance_pp: 0.1
+  # See thesis Table 26 note (p.148). This is not a security ranking.
+  is_ranking: false
+
+
+# -----------------------------------------------------------------------------
+# 10. Security boundary
+# -----------------------------------------------------------------------------
+# This block restates, in one place, what is and is not claimed for AEE.
+# It is the most important block in this file because it is the one a
+# reviewer should read before drawing any conclusion about the security
+# of the framework. The thesis states this boundary in §5.2.5 (p.123)
+# and §5.2.6 (p.123-124); this file copies it verbatim where possible and
+# adds no claim that is not in the thesis.
+
+security:
+  # What IS claimed:
+  claimed:
+    - "The key-encapsulation layer of AEE is IND-CCA2 secure under the standard KEM-combiner result (thesis §5.2.6, Proposition 1, p.123-124). The proof is the published combiner result; it is not re-derived in this thesis."
+    - "The KEM-combiner result holds for every configuration the modulation policy of §6 can select, because the policy never selects a configuration weaker than the baseline (see §6, downgrade_patience_windows, and the analogous rule in thesis §3.7.2, p.64)."
+    - "The quantum-resistance claim is conditional on the conjectured hardness of Module-LWE, which is a conjecture, not a theorem (thesis §5.3.6, p.127)."
+
+  # What is NOT claimed:
+  not_claimed:
+    - "The key-evolution schedule of §3 has no IND-CCA2 proof. This is stated explicitly in thesis §5.2.5, p.123: 'no formal security proof [is] given for the schedule.' The schedule is a heuristic; its empirical unpredictability is the property the thesis relies on, and that property is measured in Chapter 5, not proven."
+    - "The estimated security level computed by the lattice-estimator (§2.2) is a *reported quantity*, not a proof of quantum resistance. Thesis §5.3.6 (p.127): 'Equation (78) was a definition of the quantity that the chapter reported. It was not a security proof.'"
+    - "AES-GCM and the other symmetric primitives used by the KDF (§11 below) are believed to be post-quantum secure only at the 128-bit level that their key length supports (Grover's algorithm gives a quadratic speedup, so 256-bit symmetric keys give ~128-bit post-quantum security). The thesis sizes the symmetric keys accordingly; this file does not restate that sizing."
+
+  # The three limits recorded by the thesis in §5.3.6 (p.127), repeated
+  # here because they apply equally to the AEE layer:
+  limits:
+    - "The hardness of Module-LWE and Ring-LWE is conjectural, not theorem."
+    - "The estimated security level assumes the attack model of the lattice-estimator; other attack models that the estimator does not assume could lower the estimated level."
+    - "The symmetric components are sized so that Grover-type search does not reduce their effective strength below 128 bits; this is a separate decision from the choice of lattice parameters, and it is not captured by the estimated security level of §2.2."
+
+
+# -----------------------------------------------------------------------------
+# 11. Key derivation
+# -----------------------------------------------------------------------------
+# The output of the AEE recurrence is a 1024 x 1024 matrix over Z_q. This
+# matrix is quantised to a 64-dimensional vector at 16-bit precision (per
+# thesis §6.4.2, p.159, which describes the SE(3) case; the AEE case uses
+# the same quantisation), and the quantised vector is passed to a
+# key-derivation function to produce the 256-bit session key used by
+# AES-GCM. The KDF and quantisation parameters are recorded here.
+
+key_derivation:
+  # Quantisation. The matrix is projected onto 64 dimensions (the
+  # rotation sub-block) and each coordinate is quantised to 16 bits.
+  # 64 * 16 = 1024 bits of quantised entropy, which is comfortably above
+  # the 256-bit key target and leaves margin for the KDF to extract.
+  quantisation:
+    output_dim: 64
+    bits_per_coordinate: 16
+    # The projection is a fixed random orthonormal basis, seeded by the
+    # run seed + 1 (so that the projection is reproducible across runs
+    # but not correlated with the training seed + 0).
+    projection_seed_offset: 1
+
+  # Key derivation. The KDF extracts a 256-bit session key from the
+  # quantised vector. HKDF-SHA256 is the standard choice; it is
+  # referenced in thesis §6.4.2 (p.159) and is not a new construction.
+  kdf:
+    family: "hkdf"
+    hash: "sha256"
+    output_bits: 256
+    salt_source: "traffic_entropy"   # HKDF salt = H(tau) from §4
+    info: "e3doh-aee-session-key-v1"
+
+  # Rotation output. The translational sub-block of the quantised vector
+  # determines the initialisation vector and the rotation cadence for the
+  # next cycle; this is the SE(3)-style separation described in thesis
+  # §6.4.2 (p.159), which the AEE layer inherits. The rotation is
+  # deterministic given the key state, which is what makes the next
+  # rotation predictable to the engine and (hopefully) not to the
+  # adversary.
+  rotation:
+    iv_bits: 128
+    cadence_source: "translational_block"
+
+
+# -----------------------------------------------------------------------------
+# 12. Verification hooks
+# -----------------------------------------------------------------------------
+# These keys are read by scripts/reproduce_tables/table_26_multiprotocol_performance.py
+# and by expected_outputs/verification_script.py. They specify which
+# reference files to compare against and what to do on a mismatch.
+
+verification:
+  reference_file: "expected_outputs/table_26_expected.json"
+  reference_keys:
+    - "per_protocol.doh.parameter_update_time_us"
+    - "per_protocol.dot.parameter_update_time_us"
+    - "per_protocol.doq.parameter_update_time_us"
+    - "post_quantum_stack_share.doh"
+    - "post_quantum_stack_share.dot"
+    - "post_quantum_stack_share.doq"
+  # Whether to also verify the security-level estimate. This is set to
+  # false by default because the estimate requires the lattice-estimator
+  # binary, which is not a pip-installable dependency (see
+  # requirements.txt §9); a reviewer who has the estimator installed can
+  # set this to true with --set verification.verify_security=true.
+  verify_security: false
+  security_estimate_file: "expected_outputs/aee_security_estimate.json"
+
+# =============================================================================
+# End of aee_params.yaml
+# =============================================================================
