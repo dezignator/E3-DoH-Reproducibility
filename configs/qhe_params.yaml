@@ -1,0 +1,522 @@
+# =============================================================================
+# E3-DoH Reproducibility — Quantum-Safe Homomorphic Encryption (QHE) Parameters
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file holds every parameter of the Quantum-Safe Homomorphic Encryption
+# component. QHE is the Ring-LWE encryption layer that allows the anomaly
+# detection functions to be evaluated on ciphertext without decryption
+# (thesis §5.3). The security claim is IND-CPA under the decisional Ring-LWE
+# assumption (thesis §5.3.5, Eq. 77). QHE is NOT IND-CCA2 and cannot be,
+# because homomorphic encryption schemes are malleable by design; ciphertext
+# integrity is provided by the authenticated transport (TLS 1.3 for DoH and
+# DoT, QUIC with TLS 1.3 for DoQ), not by the homomorphic layer itself
+# (thesis §5.3.5, p.126).
+#
+# IMPORTANT — two distinct parameter sets.
+#   This file describes QHE:        n = 256,  q = 4096
+#   Sibling aee_params.yaml:        n = 1024, q ≈ 2^32
+#
+# These two parameter sets are DIFFERENT and are kept separate throughout
+# the chapter. Thesis §5.3.5 (p.126) explicitly corrects an earlier draft
+# in which n=1024 was assigned to both layers. Do not merge them. The
+# common ring form (x^n + 1) is what allows the two layers to interoperate;
+# the dimensions and moduli are deliberately distinct because the two
+# layers serve different purposes.
+#
+# Equation references point at the thesis (§5.3, §5.3.7, §5.3.8, §6.5).
+#
+# Sibling files:
+#   default_e3_config.yaml     — master config, includes this file by reference
+#   aee_params.yaml            — Module-LWE parameters for the key-encapsulation layer
+#   riemannian_metrics.yaml    — protocol-specific metric tensors
+#   fl_dp_params.yaml          — federated learning DP parameters
+#   sandbox_mdp_params.yaml    — AMPS sandbox control parameters
+#   attack_suite_params.yaml   — per-attack rate, duration, target
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Metadata
+# -----------------------------------------------------------------------------
+# Identifies the component, the thesis version, and the specific security
+# boundary that applies to this layer. The security boundary is repeated
+# in §9 of this file so a reviewer reading only this file sees it, and it
+# is also recorded here in machine-readable form so that a script can
+# emit the appropriate caveat with every output row.
+
+metadata:
+  framework: "E3-DoH"
+  component: "QHE"
+  component_full_name: "Quantum-Safe Homomorphic Encryption"
+  artifact_version: "1.0.0"
+  thesis_section: "5.3"
+  thesis_page_anchor: "p.124-128"
+  # The only formal security claim for this layer is IND-CPA. See §9.
+  security_claim: "IND-CPA"
+  security_assumption: "decisional Ring-LWE"
+  # The following layer is explicitly NOT claimed for QHE. This field
+  # exists so that a script emitting a result row can programmatically
+  # attach the correct caveat rather than a human copy-pasting it.
+  not_claimed:
+    - "IND-CCA2"
+    - "ciphertext integrity"
+    - "malleability resistance"
+
+
+# -----------------------------------------------------------------------------
+# 2. Ring-LWE parameters
+# -----------------------------------------------------------------------------
+# QHE uses the Ring-LWE encryption scheme with the standard cyclotomic
+# ring (thesis §5.3.1, p.124). Ring-LWE was chosen over generic LWE
+# because the ring structure allows polynomial multiplication to be
+# performed efficiently while preserving the hardness guarantee for the
+# underlying problem (thesis §5.3.1, p.124).
+#
+# Thesis §5.3.1 states the parameters explicitly:
+#   n = 256  (ring dimension)
+#   q = 4096 (modulus)
+#
+# Eq. 58 in the thesis (p.104, §4.21) gives the generic Ring-LWE
+# encryption form. Eq. 74-76 (p.124-125, §5.3.2-5.3.3) give the
+# homomorphic evaluation. Eq. 77 (p.126) gives the IND-CPA statement.
+# Eq. 79 (p.127) gives the complexity. Eq. 80 (p.128) gives the same
+# complexity with the QHE parameter set n=256, q=4096 substituted.
+
+lattice:
+  ring:
+    polynomial: "x^n + 1"        # cyclotomic polynomial, standard for ring-LWE
+    n: 256                        # ring dimension (QHE-specific; NOT the AEE n)
+    q: 4096                       # modulus (QHE-specific; NOT the AEE q_baseline)
+    q_bits: 12                    # log2(4096); the arithmetic is all mod 2^12
+    # Rationale (thesis §5.3.1, p.124): n=256, q=4096 were chosen "for
+    # interoperability with the AEE module and for the latency budget of
+    # the pipeline." Both factors are deliberate. A larger n would give
+    # a higher security level but would exceed the latency budget; a
+    # larger q would give more multiplicative depth but would increase
+    # the noise growth rate. The pair (256, 4096) is the operating point.
+
+  # The plaintext space is R_2 = Z_2[x] / (x^n + 1): the message vector
+  # is a polynomial whose coefficients are in {0, 1}. This is the
+  # standard binary message space for Ring-LWE, and it is what makes
+  # the anomaly-detection functions (which reduce to threshold tests on
+  # quantised features) evaluable as boolean circuits.
+  plaintext:
+    ring: "R_2"
+    coefficients: "binary"        # {0, 1}
+    # Encoding (thesis §5.3.1, p.124): a message m in R_2 is encoded by
+    # multiplying by floor(q/2), which places the message in the high
+    # bit of each coefficient. Decryption recovers the bit by rounding.
+    encoding: "floor(q/2) * m"
+
+  # Secret and error distributions. The secret s is sampled from the
+  # error distribution chi, and the error e is sampled from the same chi.
+  # The standard deviation below is calibrated so that the noise budget
+  # (§5) is exhausted at exactly the multiplicative depth limit of §5.4.
+  distribution:
+    family: "centred_discrete_gaussian"
+    sigma_err: 3.19               # standard deviation of chi
+    sampler: "ziggurat"           # see §4; shared with AEE for consistency
+    # The 3.19 value matches the AEE sigma_err for consistency of the
+    # sampling implementation, and is the value that the artifact uses
+    # to reproduce the complexity numbers in thesis §5.3.7-5.3.8.
+
+  # Security estimate. Thesis §5.3.6 (p.126-127) defines the estimated
+  # security level as the minimum lambda such that the attack cost
+  # returned by the lattice-estimator is at least 2^lambda (Eq. 78,
+  # p.126). The value is computed by the estimator, not by this file;
+  # the file records the target and the version pin.
+  security:
+    target_level_bits: 128        # conservative post-quantum target
+    estimator: "lattice-estimator"
+    estimator_version: "0.1.0"
+    # The estimated level is written to
+    # expected_outputs/qhe_security_estimate.json after the first full
+    # run. It is NOT a proof of quantum resistance; thesis §5.3.6 is
+    # explicit that Eq. 78 "was not a security proof" (p.127). See §9.
+
+
+# -----------------------------------------------------------------------------
+# 3. Encryption and decryption
+# -----------------------------------------------------------------------------
+# Thesis §5.3.1 (p.124) gives the encryption equations. The public key is
+# (a, b) with a uniform in R_q and b = a*s + e, where s and e are sampled
+# from chi. Encryption of a message m in R_2 produces two ciphertext
+# components:
+#
+#     c0 = b*r + e0 + m
+#     c1 = a*r + e1
+#
+# where r is sampled from chi and e0, e1 are small noise terms.
+#
+# Decryption computes c0 - c1*s mod q and rounds to the nearest element
+# of R_2. Correctness holds as long as the accumulated noise stays small
+# relative to q/2; this is the noise-budget condition of §5 below.
+
+encryption:
+  # Sampling bounds for r, e0, e1. These are the same distribution as
+  # the secret (chi) but with their own independent samples. The bounds
+  # below are the ±k*sigma range outside which a sample is rejected and
+  # resampled, following the standard Gaussian tail-cut of the Ring-LWE
+  # literature.
+  r: { sigma_multiplier: 6, rejection_bound: 6.0 }
+  e0: { sigma_multiplier: 6, rejection_bound: 6.0 }
+  e1: { sigma_multiplier: 6, rejection_bound: 6.0 }
+
+  # Ciphertext serialization. The artifact writes ciphertexts as raw
+  # 12-bit little-endian integers, coefficient by coefficient, followed
+  # by the modulus as a 4-byte footer. This is not the wire format of
+  # any production implementation; it is the artifact's internal format,
+  # chosen for readability when debugging. Do not change it without
+  # regenerating expected_outputs/.
+  serialization:
+    format: "raw_12bit_le"
+    footer_bytes: 4               # q = 4096 as uint32 LE
+
+
+# -----------------------------------------------------------------------------
+# 4. Gaussian sampling (Ziggurat)
+# -----------------------------------------------------------------------------
+# The error samples (s, e, r, e0, e1) are drawn from a centred discrete
+# Gaussian. The sampler is the standard Ziggurat rejection algorithm
+# (thesis §6.5.2, p.162, applied to the AEE sampling; reused here for
+# QHE so that both layers share a single implementation).
+#
+# Ziggurat works by pre-computing a table of (x_i, y_i) pairs that
+# approximate the Gaussian's tail. A sample is drawn by:
+#   1. Picking a random layer i uniformly from {0, ..., N-1}.
+#   2. Picking a random x uniformly from [x_{i+1}, x_i].
+#   3. If x < x_i or y_i + (y_i - y_{i+1}) * x > pdf(x), accepting x.
+#   4. Otherwise, resampling inside layer i by an inner rejection step.
+#
+# The table is built once per process at load time and cached. It is
+# NOT regenerated per sample; that would defeat the purpose.
+
+sampler:
+  family: "ziggurat"
+  # Number of layers. 256 is the standard value from the Marsaglia-
+  # Tsang reference implementation, and matches the value used in
+  # thesis §6.5.2 (p.162) for the AEE layer.
+  layers: 256
+  # Base distribution for the tail: the exponential distribution is
+  # used as the base, matching the reference implementation.
+  tail_distribution: "exponential"
+  # The sampler is built with the same seed offset as the encryption
+  # layer so that a sequence of samples can be reproduced from the run
+  # seed. Note: this makes the sampler deterministic, which is what a
+  # reproducibility artifact wants, but which is NOT what a production
+  # implementation wants. See §9, note on determinism.
+  seed_offset: 2                  # run seed + 2
+  # Pre-computation cache. The table is computed once and stored in
+  # .cache/qhe_ziggurat.npy to avoid recomputing it on every process
+  # start. The cache is gitignored.
+  cache_path: ".cache/qhe_ziggurat.npy"
+
+
+# -----------------------------------------------------------------------------
+# 5. Noise budget and circuit depth
+# -----------------------------------------------------------------------------
+# Correctness of decryption depends on the accumulated noise staying
+# below q/4 (the "noise budget"). Each homomorphic addition adds a
+# small amount of noise; each homomorphic multiplication roughly
+# doubles the noise magnitude. Beyond a certain multiplicative depth,
+# the noise exceeds the budget and decryption fails.
+#
+# Thesis §5.3.4 (p.125) states the artifact's hybrid approach:
+#   - modulus switching at each multiplication step
+#   - bootstrapping when the budget is exhausted
+#
+# The parameters below control both mechanisms and the check that
+# guarantees the budget is never exceeded.
+
+noise_budget:
+  # The total budget, expressed as the maximum allowed ratio of noise to
+  # q/4. A value of 1.0 means the noise has reached q/4 and decryption
+  # fails; the operational threshold is set below to leave margin.
+  q_over_four_fraction: 1.0
+  operational_threshold: 0.85     # refuse to continue once noise reaches 85% of budget
+
+  # Per-operation noise growth. These are the standard parameters from
+  # the Ring-LWE literature for n=256, q=4096 with sigma_err=3.19.
+  growth:
+    addition: 1.0                 # addition does not grow noise magnitude
+    multiplication_factor: 2.0    # each multiplication roughly doubles noise
+    # The exact growth factor depends on the specific operands; the
+    # factor above is the worst-case bound used to size the depth limit
+    # in §5.4 below.
+
+  # Modulus switching. When the accumulated noise approaches the
+  # operational threshold, the ciphertext is scaled down by a factor
+  # (the "modulus switching step") that reduces the noise in the same
+  # proportion. The step is a tunable; a larger step gives more budget
+  # at the cost of a coarser modulus.
+  modulus_switching:
+    enabled: true
+    step_bits: 4                  # each switch reduces q by 4 bits
+    # After switching from q=4096 (12 bits) down by 4 bits, the effective
+    # modulus is 2^8 = 256. This is the minimum practical modulus for
+    # the message-space rounding; switching below this would make the
+    # plaintext unrecoverable. The artifact refuses to switch below 8
+    # bits and prefers bootstrapping instead.
+    min_modulus_bits: 8
+
+  # Bootstrapping. When modulus switching is no longer sufficient,
+  # bootstrapping "refreshes" the ciphertext by computing the decryption
+  # function on the encrypted input, restoring the noise to the level of
+  # a freshly encrypted ciphertext. Bootstrapping is expensive (roughly
+  # 100x the cost of a multiplication) and is therefore a last resort.
+  bootstrapping:
+    enabled: true
+    # Trigger: bootstrap when the noise reaches the operational threshold
+    # AND modulus switching has already reduced the modulus to its
+    # minimum (or the multiplicative depth has reached its limit).
+    trigger: "noise_over_threshold"
+    # The bootstrapping key is generated once at key-generation time and
+    # consumed by every bootstrap. It is stored in
+    # outputs/checkpoints/qhe_bootstrap_key.npz and is gitignored (it is
+    # ~4 MB for n=256).
+    key_cache: "outputs/checkpoints/qhe_bootstrap_key.npz"
+
+  # Multiplicative depth limit. Thesis §5.3.4 (p.125) and §5.3.7 (p.127)
+  # state that the artifact supports "moderate multiplicative depth
+  # (usually 5-10 multiplications)". The value below is the hard limit;
+  # the depth is also bounded by the noise budget.
+  max_multiplicative_depth: 10
+
+
+# -----------------------------------------------------------------------------
+# 6. Selective operation set
+# -----------------------------------------------------------------------------
+# Thesis §6.5.3 (p.164) describes the selective homomorphic-operation
+# design: the anomaly-detection pipeline does not need general-purpose
+# circuit evaluation. The statistical tests need only additive
+# homomorphism; the classification step needs a bounded number of
+# multiplications. The artifact implements this selective set directly
+# rather than falling back on a general-purpose circuit, which is what
+# gives the ~8x reduction in homomorphic operations reported in the
+# thesis.
+#
+# IMPORTANT (thesis §6.5.3, p.164): the 8x reduction "applies only to
+# the detection functions that are analyzed in this paper... Whether
+# the same factor holds for other detection functions was not
+# evaluated." Do not generalise this to other workloads.
+
+selective_operations:
+  # The operations required by the anomaly-detection pipeline.
+  # Each entry names the operation, its homomorphic class (additive,
+  # multiplicative, or both), and the maximum depth it is allowed to
+  # consume from the budget.
+  operations:
+    - name: "sum"                   # summation over a window (statistical test)
+      class: "additive"
+      max_depth: 1
+    - name: "mean"                  # mean over a window (statistical test)
+      class: "additive"
+      max_depth: 1
+    - name: "variance"              # variance over a window (statistical test)
+      class: "additive+multiplicative"
+      max_depth: 2
+    - name: "threshold"             # threshold comparison (classification)
+      class: "multiplicative"
+      max_depth: 3
+    - name: "correlation"           # correlation between two feature streams
+      class: "additive+multiplicative"
+      max_depth: 4
+    - name: "dot_product"           # dot product (final classification step)
+      class: "multiplicative"
+      max_depth: 5
+
+  # Reduction factor relative to a general-purpose circuit (thesis
+  # §6.5.3, p.164). This is reported, not enforced; the enforcement is
+  # the operation list above.
+  reduction_factor_vs_general: 8.0
+
+  # The general-purpose circuit that the selective set replaces. It is
+  # not used in the artifact; it is referenced here so that a reviewer
+  # can see the baseline the reduction is measured against.
+  general_circuit_reference: "scripts/reproduce_tables/table_26_general_circuit_baseline.py"
+
+
+# -----------------------------------------------------------------------------
+# 7. NTT and SIMD batching
+# -----------------------------------------------------------------------------
+# Two independent optimizations reduce the cost of polynomial
+# multiplication (which is the dominant cost in Ring-LWE evaluation):
+#
+#   - Number Theoretic Transform (NTT): reduces polynomial
+#     multiplication from O(n^2) to O(n log n). Thesis §6.5.1 (p.161).
+#   - SIMD batching via AVX-512: packs multiple plaintext slots into a
+#     single ciphertext, so that a single homomorphic operation acts on
+#     1024 plaintext values at once. Thesis §6.5.1 (p.161) and
+#     §5.3.7 (p.127).
+#
+# Both are enabled by default. They are not needed for correctness;
+# they are needed to meet the latency target of Table 26.
+
+ntt:
+  enabled: true
+  # The NTT twiddle factors are computed once at load time and cached.
+  # They depend only on n and q, both of which are fixed in §2.
+  twiddle_cache: ".cache/qhe_ntt_twiddles.npy"
+  # The implementation is a standard radix-2 Cooley-Tukey NTT. The
+  # radix is fixed at 2 because n=256 is a power of two and radix-2 is
+  # the version that the AVX-512 kernel of §7.2 is optimised for.
+  radix: 2
+
+avx512:
+  enabled: true
+  # Number of plaintext slots packed into one AVX-512 register. The
+  # thesis states 1024 slots per instruction (§5.3.7, p.127); this is
+  # the number that the AVX-512 kernel of §7.2 is calibrated for.
+  slots_per_register: 1024
+  # The actual packing is done by src/models/qhe_engine.py; this file
+  # only records the calibration number so that the emulation matches
+  # the reference testbed.
+  # Note (thesis §6.5.1, p.161): the 1024-slot packing is what gives
+  # the "multiplied by 1024" throughput claim in the thesis. The claim
+  # is specific to the Ring-LWE parameter set of §2; it does not
+  # generalise to other n.
+
+# Fallback if AVX-512 is not available on the host. The artifact
+# detects AVX-512 support at load time and falls back to a scalar NTT
+# if it is not present. The fallback produces the same numerical
+# result at a slower rate; the run header records which path was taken
+# (logging.hash_configs in default_e3_config.yaml §7 captures this).
+fallback:
+  on_no_avx512: "scalar_ntt"
+  warn: true
+
+
+# -----------------------------------------------------------------------------
+# 8. Ciphertext compression and pipeline parallelization
+# -----------------------------------------------------------------------------
+# Thesis §6.5.5 (p.163) describes two additional optimizations that
+# reduce the memory footprint and improve throughput:
+#
+#   - Ciphertext compression via packing multiple plaintext values
+#     into a single ciphertext, achieving an 8:1 compression ratio.
+#   - Pipeline parallelization with a depth of 3, running across 16
+#     CPU cores at ~92% hardware utilization.
+#
+# Both are configured here. The compression ratio and pipeline depth
+# are read by scripts/reproduce_tables/table_26_multiprotocol_performance.py
+# and by src/models/qhe_engine.py.
+
+compression:
+  # Ciphertext compression. The Ring-LWE ciphertext for a single
+  # plaintext polynomial is two polynomials of n=256 coefficients each,
+  # each coefficient being 12 bits. Packing multiple plaintexts into one
+  # ciphertext gives the 8:1 compression reported in the thesis. The
+  # compression is lossless for the message space (binary coefficients);
+  # it is not lossless for the noise space, but the noise budget of §5
+  # has margin to absorb the difference.
+  enabled: true
+  ratio: 8.0                      # 8:1 compression ratio (thesis §6.5.5, p.163)
+  packing_method: "bit_packing"   # bit-level packing of binary coefficients
+
+pipeline:
+  # Pipeline depth. Thesis §6.5.5 (p.163) states depth 3.
+  depth: 3
+  # Number of CPU cores used. Thesis §6.5.5 (p.163) states 16.
+  cores: 16
+  # Target hardware utilization. Thesis §6.5.5 (p.163) states ~92%.
+  # The artifact does not enforce this; it reports the measured
+  # utilization and a mismatch outside the tolerance band is flagged.
+  target_utilization: 0.92
+  utilization_tolerance: 0.03
+
+
+# -----------------------------------------------------------------------------
+# 9. Security boundary
+# -----------------------------------------------------------------------------
+# This is the most important block in this file. It restates what QHE
+# does and does not claim, so that a reviewer reading only this file
+# cannot mistakenly attribute a security property that the thesis does
+# not attribute to this layer.
+
+security:
+  # What IS claimed (thesis §5.3.5, p.126):
+  claimed:
+    - "The QHE scheme is IND-CPA secure under the decisional Ring-LWE assumption. This is stated in Eq. 77 (p.126): Adv^{IND-CPA}_A(lambda) <= negl(lambda) under the decisional Ring-LWE assumption. The result is published; it is cited rather than re-derived (thesis §5.3.5, p.126)."
+    - "The security of the QHE layer is quantum-resistant to the extent that Ring-LWE is hard for quantum adversaries. Ring-LWE has no known polynomial-time quantum attack under the standard attack models (thesis §5.3.6, p.127)."
+
+  # What is NOT claimed (thesis §5.3.5, p.126):
+  not_claimed:
+    - "The QHE layer is NOT IND-CCA2 secure. This is a structural property of homomorphic encryption, not a limitation of the implementation: given a ciphertext, anyone can construct a related ciphertext that decrypts to a related plaintext, which is exactly the capability that IND-CCA2 forbids. Thesis §5.3.5 (p.126) states this explicitly."
+    - "The QHE layer does NOT provide ciphertext integrity. Ciphertext integrity in the E3-DoH pipeline is provided by the authenticated transport (TLS 1.3 for DoH and DoT, QUIC with TLS 1.3 for DoQ). See thesis §5.3.5, p.126."
+    - "The estimated security level (Eq. 78, p.126) is a reported quantity, not a proof. Thesis §5.3.6 (p.127): 'Equation (78) was a definition of the quantity that the chapter reported. It was not a security proof.'"
+    - "The hardness of Ring-LWE is conjectural, not theorem. This is the same limitation as for AEE's Module-LWE (aee_params.yaml §10)."
+
+  # The three limits recorded by the thesis in §5.3.6 (p.127), repeated
+  # here because they bound the quantum-resistance claim of both
+  # cryptographic layers:
+  limits:
+    - "The hardness of Ring-LWE is conjectural, not theorem."
+    - "The estimated level assumes the attack model of the lattice-estimator; other attack models could lower the estimated level."
+    - "The symmetric components are sized so that Grover-type search does not reduce their effective strength below 128 bits; this is separate from the choice of lattice parameters."
+
+  # Determinism note. The artifact uses a deterministic seed for the
+  # Gaussian sampler (§4) and the run seed (default_e3_config.yaml §2)
+  # so that runs are reproducible. This is correct for a reproducibility
+  # artifact but is NOT correct for a production implementation: a
+  # production QHE deployment must draw its random samples from a
+  # cryptographically secure random source, not from a seeded
+  # pseudo-random generator. The artifact records this distinction so
+  # that a reviewer who copies the code into a production setting knows
+  # exactly which line to change.
+  determinism_note: "The artifact uses deterministic seeding for reproducibility. Production deployments must replace the seeded sampler with a CSPRNG. See README.md §15 and the security boundary above."
+
+
+# -----------------------------------------------------------------------------
+# 10. Complexity (Eq. 79 / Eq. 80)
+# -----------------------------------------------------------------------------
+# Thesis §5.3.7 (p.127) gives the complexity of the QHE scheme:
+#
+#     C_HE(n, d) = O( n * log(q) * log^2(n) * d^{log_2 3}
+#                    * log(1/delta_LWE) / epsilon_quantum )
+#
+# Equation 80 (p.128) substitutes the QHE parameter set n=256, q=4096.
+# The complexity is stated here so that a reviewer can read the reported
+# latency (Table 26) against the expected scaling.
+
+complexity:
+  # The parameters of Eq. 80, substituted with the QHE parameter set.
+  n: 256
+  q: 4096
+  # The terms below are not evaluated numerically; they are recorded so
+  # that a change to n or q in §2 can be checked against the complexity
+  # formula. The exponent d^{log_2 3} ≈ d^{1.585} is why a bounded
+  # multiplicative depth of 10 (from §5) is tolerable but a depth of 20
+  # would not be.
+  depth_exponent: 1.585             # log_2(3)
+  # The complexity is measured empirically in
+  # scripts/reproduce_tables/table_26_multiprotocol_performance.py and
+  # the measured overhead is compared to the theoretical prediction.
+
+
+# -----------------------------------------------------------------------------
+# 11. Verification hooks
+# -----------------------------------------------------------------------------
+# These keys are read by scripts/reproduce_tables/table_26_multiprotocol_performance.py
+# and by expected_outputs/verification_script.py.
+
+verification:
+  reference_file: "expected_outputs/table_26_expected.json"
+  # The QHE layer does not have its own row in Table 26. Its contribution
+  # is baked into the latency and throughput columns, and its security
+  # is recorded separately in the estimated-security-level file below.
+  reference_keys: []
+  # Verify the security estimate against the reference file. This is
+  # disabled by default because the lattice-estimator binary is not a
+  # pip-installable dependency (see requirements.txt §9). Set to true
+  # with --set verification.verify_security=true if the estimator is
+  # installed.
+  verify_security: false
+  security_estimate_file: "expected_outputs/qhe_security_estimate.json"
+
+# =============================================================================
+# End of qhe_params.yaml
+# =============================================================================
