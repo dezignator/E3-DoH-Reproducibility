@@ -1,0 +1,482 @@
+# =============================================================================
+# E3-DoH Reproducibility — Master Configuration
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file is the master configuration. Every runnable script in scripts/
+# and every module in src/ reads it at load time. Component-specific
+# parameters (AEE lattice dimensions, QHE parameters, FL differential-privacy
+# budget, sandbox control weights, Riemannian metric tensors, attack-suite
+# rates) live in the sibling YAML files, which are included by reference at
+# the bottom of this file. Nothing that varies between runs is hard-coded in
+# Python; if it varies, it belongs here or in one of the sibling files.
+#
+# Validation:
+#   This file is validated against configs/schema.json at import time. A
+#   missing field, a wrong type, or an out-of-range value fails the run
+#   immediately with a message pointing at the offending line. This is
+#   deliberate: a misconfigured run that silently produces a wrong number
+#   is worse than a run that refuses to start.
+#
+# Overriding:
+#   Any key can be overridden at the command line via --set, e.g.
+#       python scripts/train_e3.py --set runtime.mode=full --set runtime.seed=7
+#   Overrides are logged in the run's JSON header so a reviewer can see
+#   exactly what was changed.
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Artifact metadata
+# -----------------------------------------------------------------------------
+# Recorded in every output JSON so a result can be traced back to the
+# configuration that produced it. Bump `artifact_version` only when a
+# material change to the numerical results is made — see
+# REPRODUCIBILITY_CHECKLIST.md §9 for the changelog convention.
+
+artifact:
+  name: "E3-DoH-Reproducibility"
+  version: "1.0.0"                 # matches STATUS.md §1
+  chapter: 5                        # of the thesis
+  framework: "E3-DoH"
+  thesis_title: "Next-Generation Secure Encrypted DNS Architectures: Four Complementary Frameworks for Adaptive, Privacy-Preserving, and Quantum-Resilient Defense"
+  citation_key: "thesis2026e3doh"
+
+
+# -----------------------------------------------------------------------------
+# 2. Runtime
+# -----------------------------------------------------------------------------
+# The mode switch is the single most important control in this file. It
+# determines whether a run is a code-path exercise (toy) or a numerical
+# reproduction (full). See REPRODUCIBILITY_CHECKLIST.md §8 for the
+# interpretation of a mismatch in each mode.
+
+runtime:
+  # toy  : uses a schema-matched synthetic corpus with 2000 flows per
+  #         protocol; runs end-to-end on CPU in ≈ 10 minutes; exercises
+  #         every code path but does NOT aim at the thesis numbers.
+  # full : uses the three external datasets (DS-1, DS-2, DS-3) and the
+  #         reference testbed; runs in 6–9 hours; aims at the thesis numbers
+  #         within the tolerances in REPRODUCIBILITY_CHECKLIST.md §5.
+  mode: "toy"
+
+  # Global random seed. Every stochastic component (SDE step, DP noise,
+  # GAN query generation in the attack suite, client sampling in the
+  # federated rounds) draws from a single seed derived from this value.
+  # Changing it invalidates expected_outputs/ — see the version-bump
+  # policy in requirements.txt. If you need to run with a different seed
+  # for your own experiments, use --set runtime.seed=N; the verification
+  # script will then warn that the run is not comparable to the committed
+  # reference.
+  seed: 42
+
+  # Determinism controls. `cudnn_benchmark` is set to false in full mode
+  # by default because benchmarking introduces run-to-run non-determinism
+  # in the CUDA convolution kernels, which would break the byte-level
+  # comparison in figure_11_expected.svg. If you are reproducing only
+  # Table 26 (which has a numerical tolerance band) and want the extra
+  # speed, override this with --set runtime.deterministic=false.
+  deterministic: true
+  cudnn_benchmark: false
+  torch_threads: 8                  # CPU thread count for torch ops
+  numpy_threads: 8                  # CPU thread count for BLAS
+  omp_threads: 8                    # OpenMP thread count (numba, sklearn)
+
+  # Number of parallel workers for data loading and Dask preprocessing.
+  # In toy mode this is set to 4 to fit comfortably inside a Colab
+  # instance; in full mode it is set to 16 to match the reference testbed
+  # (STATUS.md §6).
+  num_workers: 4
+
+  # Whether to fail fast on the first error (true) or continue with a
+  # warning and a `"status": "partial"` tag in the output JSON (false).
+  # The default is true; a reviewer who wants a full picture of how many
+  # artifacts reproduce should override this to false.
+  strict: true
+
+
+# -----------------------------------------------------------------------------
+# 3. Hardware backend
+# -----------------------------------------------------------------------------
+# The thesis Chapter 5 uses two hardware accelerators in addition to the
+# reference CPU testbed:
+#
+#   - NVIDIA A100 (CUDA kernels for QHE, thesis §6.5.4)
+#   - Intel Loihi 2 (neuromorphic detection, thesis §4.24, inherited by
+#     the E3-DoH FL client model)
+#
+# The artifact supports both through a backend switch. In the default
+# configuration both are emulated in software (src/hardware_simulation/),
+# so a reviewer without the hardware can still reproduce the numbers.
+# Every result row is tagged with `"hardware": "<backend>_<real|emulated>"`
+# so a reviewer can filter the JSON and see which results depended on
+# emulation.
+#
+# If you have the real hardware, set the corresponding backend to "real"
+# and run again. The same scripts run unchanged; the JSON tag changes from
+# `a100_emulated` to `a100_real`, etc. The expected_outputs/ committed in
+# this repository were produced with the emulated backend — see
+# REPRODUCIBILITY_CHECKLIST.md §2 for the verdict on each artifact.
+
+hardware:
+  # Options: "cpu" | "gpu" | "auto"
+  #   cpu  : force CPU-only execution (all accelerators emulated)
+  #   gpu  : force GPU execution; fails if no CUDA device is present
+  #   auto : use GPU if available, fall back to CPU with a warning
+  device: "auto"
+
+  # Emulated NVIDIA A100 backend. Reproduces the 2.5 TOPS-class lattice
+  # throughput trend described in thesis §6.5.4 on CPU via numba.
+  a100:
+    backend: "emulated"            # options: "emulated" | "real"
+    emulated_throughput_tops: 2.5  # calibrated against the published A100 spec
+    emulated_memory_gb: 40         # 40 GB HBM as configured in thesis §6.5.4
+    # The emulator's calibration constants are reproduced from
+    # src/hardware_simulation/a100_emulation.py, which contains the
+    # full derivation. Do not change these without regenerating the
+    # expected outputs — see the version-bump policy in requirements.txt.
+
+  # Emulated Intel Loihi 2 backend. Reproduces the LIF-neuron dynamics
+  # in software. Used by the FL client model, per thesis §4.24.
+  loihi:
+    backend: "emulated"            # options: "emulated" | "real"
+    emulated_cores: 128            # 128 neuromorphic cores
+    emulated_neurons_per_core: 1024
+    emulated_synapses_per_core: 1_000_000
+    # The full Loihi 2 topology is described in thesis §4.24.
+
+  # CPU fallback behaviour. When `device` is "auto" and no GPU is present,
+  # the run continues on CPU with the emulated A100 and Loihi backends.
+  # Set `strict_gpu: true` to fail instead of falling back.
+  strict_gpu: false
+
+
+# -----------------------------------------------------------------------------
+# 4. Paths
+# -----------------------------------------------------------------------------
+# All paths are relative to the repository root unless prefixed with "/".
+# The default layout matches the directory structure in README.md §3.
+# Changing a path here is fine for a local run; changing it in a commit
+# that also touches expected_outputs/ is a red flag and will be caught by
+# the verification script.
+
+paths:
+  # Where the datasets are expected to be on disk after data/download_datasets.py.
+  # DS-1 is the primary corpus; DS-2 and DS-3 are the protocol-specific
+  # validation corpora. See README.md §4 for the dataset IDs and access.
+  data_raw: "data/raw"
+  data_downloads: "data/downloads"
+  data_processed: "data/processed"
+  data_synthetic: "data/synthetic"     # populated by --mode toy
+
+  # Where the feature store lives after data/preprocess_zenodo.py has run.
+  feature_store: "data/processed/features"
+
+  # Where fresh runs write their outputs. This directory is gitignored;
+  # the reference numbers live in expected_outputs/ and are committed.
+  outputs: "outputs"
+  outputs_tables: "outputs/tables"
+  outputs_figures: "outputs/figures"
+  outputs_logs: "outputs/logs"
+  outputs_checkpoints: "outputs/checkpoints"
+
+  # Where the committed reference values live. Do NOT change this to
+  # point at outputs/ — the verification script distinguishes a reference
+  # directory from an output directory and will refuse to compare.
+  expected: "expected_outputs"
+
+  # The SHA-256 manifest for expected_outputs/. Populated by
+  # scripts/generate_manifest.py after the first full run.
+  manifest: "expected_outputs/MANIFEST.sha256"
+
+  # Configuration files included by reference (see §11 of this file).
+  configs_dir: "configs"
+
+  # Attack-simulation scratch space. PCAPs and network-namespace state
+  # are written here and are gitignored; see .gitignore.
+  artifacts: "artifacts"
+
+
+# -----------------------------------------------------------------------------
+# 5. Protocols
+# -----------------------------------------------------------------------------
+# E3-DoH operates on three encrypted DNS protocols. Each protocol has its
+# own transport, its own metadata schema, and its own Riemannian metric
+# tensor (configs/riemannian_metrics.yaml). The common abstraction layer
+# (src/protocols/base_adapter.py) normalises all three into a single
+# feature representation so that the downstream detection, cryptographic,
+# and federated layers can operate without per-protocol branching.
+#
+# The per-protocol parameters below control the adapter and the sandbox
+# isolation strategy. They are separate from the metric tensors, which
+# live in riemannian_metrics.yaml.
+
+protocols:
+  # Whether to run all three protocols in every script, or only the ones
+  # listed. In `full` mode all three are evaluated (Table 26 has columns
+  # for each). In `toy` mode all three are still evaluated, but on the
+  # synthetic corpus.
+  enabled:
+    - "doh"
+    - "dot"
+    - "doq"
+
+  # DNS-over-HTTPS. Thesis §5.1, §5.4.2, §5.6.4.
+  doh:
+    enabled: true
+    transport: "http2"             # options: "http2" | "http3"
+    default_port: 443
+    sandbox_action: "terminate_stream"
+    # The DoH metric tensor parameters (λ, α) live in
+    # configs/riemannian_metrics.yaml, not here.
+
+  # DNS-over-TLS. Thesis §5.1, §5.4.4, §5.6.4.
+  dot:
+    enabled: true
+    default_port: 853
+    tls_min_version: "1.3"
+    sandbox_action: "reset_tls"
+    # The DoT metric tensor parameters (β, γ) live in
+    # configs/riemannian_metrics.yaml.
+
+  # DNS-over-QUIC. Thesis §5.1, §5.4.5, §5.6.4.
+  doq:
+    enabled: true
+    default_port: 853
+    quic_version: 1
+    sandbox_action: "migrate_connection"
+    # The DoQ metric tensor parameters (η, Q) live in
+    # configs/riemannian_metrics.yaml.
+
+
+# -----------------------------------------------------------------------------
+# 6. Detection pipeline
+# -----------------------------------------------------------------------------
+# The detection pipeline is composed of three layers: the anomaly detector
+# (geodesic-flow deviation, §5.5), the AEE key-rotation trigger (§5.2.5),
+# and the AMPS sandbox decision (§5.6). Each layer has its own threshold,
+# which is calibrated on a held-out benign split and locked here for
+# reproducibility. Changing a threshold invalidates the expected outputs;
+# see the version-bump policy in requirements.txt.
+
+detection:
+  # The anomaly score is the deviation of the observed geodesic flow from
+  # the learned benign geodesic flow. Thresholds are per-protocol.
+  anomaly_threshold:
+    doh: 0.62
+    dot: 0.65
+    doq: 0.58
+
+  # Sliding-window length for the geodesic-flow computation, in seconds
+  # of traffic time. The window must be long enough to average out benign
+  # variability and short enough to detect a slow-drip attack. 30 s is
+  # the value used in the thesis.
+  window_seconds: 30
+
+  # Number of flows per window that the detector scores. Windows with
+  # fewer flows are skipped (not scored, not counted in the precision or
+  # recall denominators). This avoids the low-support inflation that
+  # would otherwise dominate the false-positive rate.
+  min_flows_per_window: 20
+
+  # Composite detection score (Eq. 107 in the thesis). Weighting is
+  # tuned on the validation split; see scripts/reproduce_tables/table_26_*.py
+  # for the weighting sweep. The three weights sum to 1.0.
+  composite_weights:
+    accuracy: 0.5
+    precision: 0.3
+    latency: 0.2
+
+  # The composite score is normalised to [0, 1]; a score above this
+  # threshold flags the flow as an attack. The value is protocol-agnostic
+  # because the composite score already normalises per-protocol.
+  composite_flag_threshold: 0.75
+
+
+# -----------------------------------------------------------------------------
+# 7. Logging
+# -----------------------------------------------------------------------------
+# Every run writes a structured JSON log that records every parameter
+# that influenced the result. This is what allows the verification script
+# to distinguish "the artifact is wrong" from "you ran it with a different
+# setting".
+
+logging:
+  level: "INFO"                    # DEBUG | INFO | WARNING | ERROR
+  format: "json"                   # json | text
+  file: "outputs/logs/e3doh.log"
+  # Append a per-run header to the log with the full resolved config,
+  # the git commit hash (if the checkout is a git working tree), and the
+  # Python + dependency versions. This is the first thing a reviewer
+  # should look at if they are debugging a mismatch.
+  write_run_header: true
+  # Record the SHA-256 of every config file that was loaded. Prevents a
+  # reviewer from accidentally comparing a run made with a modified config
+  # to the committed expected outputs.
+  hash_configs: true
+  # Emit a progress line every N seconds. Set to 0 to disable.
+  progress_interval_seconds: 30
+
+
+# -----------------------------------------------------------------------------
+# 8. Verification
+# -----------------------------------------------------------------------------
+# Controls the behaviour of expected_outputs/verification_script.py.
+# See REPRODUCIBILITY_CHECKLIST.md §3 for the exit codes.
+
+verification:
+  # Per-artifact tolerance overrides. The defaults are recorded in
+  # REPRODUCIBILITY_CHECKLIST.md §4-§5; this block is the place to
+  # tighten or loosen them for a specific run, e.g. if you are testing
+  # on a slower machine and expect slightly higher latencies.
+  # Setting a tolerance to null means "use the value in the reference
+  # JSON sidecar" — this is the recommended default.
+  tolerance_overrides: {}
+    # table_26_p99_latency_ms: 0.10
+    # table_26_throughput_mqps: 0.40
+
+  # Whether to compare byte-for-byte (true) or numerically within the
+  # tolerance band (false). Byte-for-byte is appropriate for figures and
+  # for the fully deterministic tables; numerical comparison is
+  # appropriate for tables that report measured latencies or accuracies.
+  byte_level_figures: true
+
+  # Whether to fail on the first mismatch or collect all mismatches into
+  # a single report. The default is to collect all, so a reviewer sees the
+  # full picture in one pass.
+  fail_fast: false
+
+  # Emit a machine-readable diff for each mismatch. Set to false if you
+  # only want the exit code and the summary line.
+  emit_diff: true
+
+
+# -----------------------------------------------------------------------------
+# 9. Federated coordination
+# -----------------------------------------------------------------------------
+# The federated layer is configured per-protocol. Each protocol runs its
+# own federated pipeline with its own client population, because a client
+# that resolves DoH traffic cannot meaningfully contribute to the DoQ
+# training set. The differential-privacy parameters are in
+# configs/fl_dp_params.yaml; this block controls the orchestration.
+
+federated:
+  # Number of federated rounds. 10 is the convergence target from the
+  # thesis §5.13.1; the training loop stops early if the global model
+  # converges to the target accuracy before the round limit is reached.
+  rounds: 10
+
+  # Number of clients per protocol. In toy mode this is reduced to 5 to
+  # keep the round time short; in full mode it is 100, matching the
+  # reference testbed (thesis §5.13.1).
+  clients_per_protocol:
+    doh: 100
+    dot: 100
+    doq: 100
+
+  # Client sampling rate per round. Setting this to 1.0 means all clients
+  # participate every round (no sampling); the thesis uses 0.8, which is
+  # the value that produced the convergence curve in Figure 13(a).
+  client_sample_rate: 0.8
+
+  # Convergence target. Training stops when the global model accuracy on
+  # the validation split has been stable for `patience` consecutive rounds.
+  convergence:
+    target_accuracy: 0.95
+    patience: 2
+
+  # Whether to enable the cross-check described in thesis §4.6.3, in which
+  # a client update flagged as divergent by the geometric-median
+  # aggregation is cross-checked against the topological detector before
+  # being admitted to the global model. This is an engineering safeguard
+  # layered on the aggregation rule; see thesis §4.6.3 for the caveat.
+  cross_check_enabled: true
+
+
+# -----------------------------------------------------------------------------
+# 10. Attack-suite runtime
+# -----------------------------------------------------------------------------
+# The per-attack parameters (rate, duration, payload shape, detection
+# trigger, mitigation action) live in configs/attack_suite_params.yaml
+# and data/attack_matrix.csv. This block controls the *runtime* of the
+# attack suite, not the individual attacks.
+
+attack_suite:
+  # Whether to execute the attacks at all, or only to verify the matrix.
+  # Setting this to false makes --execute a no-op and is useful for a
+  # reviewer who wants to verify the data layer without running any traffic.
+  execute: true
+
+  # Whether to run attacks inside an isolated network namespace. This
+  # MUST remain true for any run that is intended to be shared. The
+  # isolation is what prevents the simulations from reaching the real
+  # network. See LICENSE, Defensive-Research Rider, §3.
+  isolation: true
+
+  # Network namespace name. Each attack gets a fresh namespace with this
+  # prefix; the namespace is destroyed on process exit.
+  namespace_prefix: "e3doh_atk_"
+
+  # Whether to capture a PCAP for each attack. PCAPs are written to
+  # artifacts/ and are gitignored. Set to false in toy mode to save disk.
+  capture_pcap: false
+
+  # Maximum wall-clock per attack scenario, in seconds. A scenario that
+  # exceeds this is killed and the result is recorded as "timeout".
+  timeout_seconds: 300
+
+
+# -----------------------------------------------------------------------------
+# 11. Includes — component-specific parameter files
+# -----------------------------------------------------------------------------
+# The keys below are include declarations, not values. They tell the
+# config loader where to find the sibling files that hold the
+# component-specific parameters. Every included file is validated against
+# the same schema and its SHA-256 is recorded in the run header (see
+# logging.hash_configs above).
+#
+# Do not inline the contents of these files into this one. The separation
+# is deliberate: it means a reviewer can change one component's parameters
+# without risking a typo in a file that also controls a different component.
+
+includes:
+  aee: "configs/aee_params.yaml"           # Module-LWE, entropy thresholds, per-protocol rotation cadence
+  qhe: "configs/qhe_params.yaml"           # Ring-LWE, multiplicative depth, selective-operation set
+  fl_dp: "configs/fl_dp_params.yaml"       # DP-SGD ε, δ, clipping, geometric-median aggregation
+  sandbox_mdp: "configs/sandbox_mdp_params.yaml"  # HJB weights, KL/Rényi thresholds, per-protocol TTL
+  riemannian_metrics: "configs/riemannian_metrics.yaml"  # per-protocol metric tensors
+  attack_suite: "configs/attack_suite_params.yaml"       # per-attack rate, duration, target, payload shape
+  schema: "configs/schema.json"            # JSON-schema for all of the above
+
+
+# -----------------------------------------------------------------------------
+# 12. Operational notes
+# -----------------------------------------------------------------------------
+# Three notes that do not belong in any of the sections above.
+#
+# Note 1 — the toy/full distinction is load-bearing.
+#   A reviewer who runs the artifact in toy mode and sees numbers that
+#   differ from Table 26 should not conclude that the artifact is broken.
+#   Toy mode is documented (README.md §6, REPRODUCIBILITY_CHECKLIST.md §8)
+#   as a code-path exercise, not a numerical reproduction. Numerical
+#   reproduction requires --mode full and the three external datasets.
+#
+# Note 2 — changing a threshold invalidates the reference.
+#   Every threshold in sections 6, 8, and 10 was calibrated on the
+#   reference split and committed to expected_outputs/. Changing one and
+#   not regenerating the reference is the single most common way a
+#   reproducibility artifact goes wrong. The version-bump policy in
+#   requirements.txt describes the correct procedure.
+#
+# Note 3 — the includes are not optional.
+#   The config loader treats a missing include as a fatal error, not a
+#   warning. This is deliberate: a run without the AEE parameters would
+#   fall back to hard-coded defaults in src/models/aee_engine.py, which
+#   were never calibrated against the thesis, and the run would produce
+#   numbers that look plausible but are wrong. The loader fails loudly
+#   instead.
+#
+# =============================================================================
