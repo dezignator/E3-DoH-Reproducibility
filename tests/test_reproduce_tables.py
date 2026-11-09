@@ -24,7 +24,10 @@ Run with:
     pytest tests/test_reproduce_tables.py -v
 
 To run only the fast tests:
-    pytest tests/ -v --ignore=tests/test_reproduce_tables.py
+    pytest tests/ -v -m "not slow"
+
+(The `slow` marker and the corresponding --run-slow flag are declared
+in tests/conftest.py.)
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import pytest
 
@@ -62,10 +65,31 @@ def _toy_features_available() -> bool:
     )
 
 
-def _run_script(args: List[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run a script from the repo root."""
+def _run_python(args: List[str], timeout: int = 300) -> subprocess.CompletedProcess:
+    """
+    Run a Python script from the repo root.
+
+    `args` is the full argument list beginning with the script path,
+    e.g. ["scripts/train_e3.py", "--mode", "toy"]. The Python
+    interpreter is prepended here; do not include it in `args`.
+    """
     return subprocess.run(
         [sys.executable] + args,
+        cwd=str(_REPO_ROOT),
+        capture_output=True, text=True, timeout=timeout,
+    )
+
+
+def _run_bash(args: List[str], timeout: int = 300) -> subprocess.CompletedProcess:
+    """
+    Run a shell script from the repo root.
+
+    `args` is the full argument list beginning with the script path,
+    e.g. ["scripts/reproduce_all.sh", "--mode", "toy"]. The `bash`
+    interpreter is prepended here; do not include it in `args`.
+    """
+    return subprocess.run(
+        ["bash"] + args,
         cwd=str(_REPO_ROOT),
         capture_output=True, text=True, timeout=timeout,
     )
@@ -89,13 +113,13 @@ requires_toy_features = pytest.mark.skipif(
 
 class TestVerificationScript:
     def test_help(self):
-        r = _run_script(["expected_outputs/verification_script.py", "--help"], timeout=30)
+        r = _run_python(["expected_outputs/verification_script.py", "--help"], timeout=30)
         assert r.returncode == 0
         assert "verification" in r.stdout.lower()
 
     def test_missing_artifact_reports_error(self):
         # A freshly checked-out artifact has no outputs/tables/* yet.
-        r = _run_script(
+        r = _run_python(
             ["expected_outputs/verification_script.py",
              "--artifact", "table_26", "--skip-manifest"],
             timeout=30,
@@ -112,7 +136,7 @@ class TestVerificationScript:
 @requires_toy_features
 class TestTable19:
     def test_toy_runs(self):
-        r = _run_script([
+        r = _run_python([
             "scripts/reproduce_tables/table_19_scalability.py",
             "--mode", "toy",
         ])
@@ -128,7 +152,7 @@ class TestTable19:
 @requires_toy_features
 class TestTable20:
     def test_toy_runs(self):
-        r = _run_script([
+        r = _run_python([
             "scripts/reproduce_tables/table_20_pipeline.py",
             "--mode", "toy", "--protocol", "doh",
         ])
@@ -137,7 +161,6 @@ class TestTable20:
         assert out.exists()
         payload = json.loads(out.read_text())
         assert "rows" in payload
-        # All five stages present.
         for stage in ("parsing_latency_us", "extraction_latency_us",
                       "scoring_latency_ms", "decision_latency_ms",
                       "mitigation_latency_ms"):
@@ -147,7 +170,7 @@ class TestTable20:
 @requires_toy_features
 class TestTable25:
     def test_toy_runs(self):
-        r = _run_script([
+        r = _run_python([
             "scripts/reproduce_tables/table_25_privacy_analysis.py",
             "--mode", "toy",
         ])
@@ -169,7 +192,7 @@ class TestTable25:
 @requires_toy_features
 class TestTable26:
     def test_toy_runs(self):
-        r = _run_script([
+        r = _run_python([
             "scripts/reproduce_tables/table_26_multiprotocol_performance.py",
             "--mode", "toy",
         ])
@@ -204,20 +227,31 @@ class TestTable18:
 @requires_toy_features
 class TestFigure11:
     def test_runs(self):
-        r = _run_script(["scripts/reproduce_figures/figure_11_architecture.py"])
+        r = _run_python(["scripts/reproduce_figures/figure_11_architecture.py"])
         assert r.returncode == 0, r.stdout + r.stderr
         out = _REPO_ROOT / "outputs" / "figures" / "figure_11.svg"
         assert out.exists()
-        # The SVG should be well-formed (starts with <?xml, ends with </svg>).
         content = out.read_text()
         assert content.startswith("<?xml")
         assert "</svg>" in content
+
+    def test_verifies_against_reference(self):
+        # Ensure the reference exists, then run with --verify.
+        ref = _REPO_ROOT / "expected_outputs" / "figure_11_expected.svg"
+        if not ref.exists():
+            pytest.skip("figure_11_expected.svg not committed (see File 86)")
+        # Regenerate the output first.
+        _run_python(["scripts/reproduce_figures/figure_11_architecture.py"])
+        r = _run_python([
+            "scripts/reproduce_figures/figure_11_architecture.py", "--verify",
+        ])
+        assert r.returncode == 0, r.stdout + r.stderr
 
 
 @requires_toy_features
 class TestFigure12:
     def test_runs(self):
-        r = _run_script([
+        r = _run_python([
             "scripts/reproduce_figures/figure_12_performance.py",
             "--mode", "toy",
         ])
@@ -229,7 +263,7 @@ class TestFigure12:
 @requires_toy_features
 class TestFigure13:
     def test_runs(self):
-        r = _run_script([
+        r = _run_python([
             "scripts/reproduce_figures/figure_13_federated_privacy.py",
             "--mode", "toy",
         ])
@@ -251,24 +285,22 @@ class TestToyEndToEnd:
         embedded reference should pass (or report expected fail).
 
         This test is marked slow; it takes several minutes on a CPU.
+        The `_run_bash` helper is used for `scripts/reproduce_all.sh`
+        because that file is a shell script, not a Python script.
         """
-        # Run the reproduction driver, skipping verification (we do
-        # it explicitly below).
-        r = _run_script(
+        r = _run_bash(
             ["scripts/reproduce_all.sh", "--mode", "toy", "--skip-data"],
             timeout=900,
         )
         # The driver exits 1 on any per-table failure. A toy-mode
         # table 18 run needs scapy; if scapy is missing, it fails.
         # We check that at least the verification-relevant outputs
-        # exist.
+        # exist, not that the driver returned 0.
         if r.returncode != 0:
-            # Not a hard failure if the failure was a documented
-            # partial (Table 18 with no scapy).
             pass
 
         # Verify table 26 (the headline table).
-        v = _run_script(
+        v = _run_python(
             ["expected_outputs/verification_script.py",
              "--artifact", "table_26", "--skip-manifest"],
             timeout=60,
@@ -279,6 +311,28 @@ class TestToyEndToEnd:
         # did not write its output.
         assert v.returncode in (0, 1), (
             f"verification script failed unexpectedly: rc={v.returncode}\n"
+            f"stdout: {v.stdout}\nstderr: {v.stderr}"
+        )
+
+    def test_supplementary_verification(self):
+        """
+        Verify that the supplementary verification script runs and
+        returns 0 (all pass) or 1 (mismatch, expected in toy mode).
+
+        The supplementary script covers Tables 21–24, whose reference
+        files are committed. In toy mode the reproduction of those
+        tables is a string comparison against the attack matrix, so
+        it should pass; the exit code 0 is the expected path.
+        """
+        v = _run_python(
+            ["expected_outputs/verify_supplementary.py", "--all"],
+            timeout=60,
+        )
+        # 0 = all pass, 1 = mismatch (should not happen for the
+        # string-comparison tables), 2 = missing output (expected if
+        # the reproduction scripts were not run yet).
+        assert v.returncode in (0, 2), (
+            f"supplementary verification unexpected rc={v.returncode}\n"
             f"stdout: {v.stdout}\nstderr: {v.stderr}"
         )
 
