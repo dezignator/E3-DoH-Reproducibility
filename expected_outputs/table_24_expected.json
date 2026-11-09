@@ -1,0 +1,57 @@
+{
+  "table": "table_24",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 24 (p.143) of the thesis",
+  "note": "Table 24 documents five injection-layer attacks with their detection signs and countermeasures, organized by layer. The schema rows below are transcribed verbatim from the thesis. The overlap_rows section records the two layers (A14 HTTP/2 stream dependency loop, A15 encrypted payload fuzzing) that also appear as scenarios in data/attack_matrix.csv; the other three layers are documented in Table 24 but not separately exercised as attack-matrix rows.",
+  "schema_rows": [
+    {
+      "injection_layer": "Network Layer",
+      "attack_method": "IP fragmentation attack",
+      "injection_command": "nmap -f --data-length 24 target/24",
+      "detection_sign": "frag_offset ∩ prev_offset ≠ Ø",
+      "countermeasure": "Reassembly validation: valid-date_fragments(ip_packets)"
+    },
+    {
+      "injection_layer": "Transport Layer",
+      "attack_method": "TCP sequence prediction",
+      "injection_command": "tcpseq.py -predict -target ip -spoof -inject \"malicious\"",
+      "detection_sign": "Δseq ∈ [1, MSS]",
+      "countermeasure": "QUIC migration enforcement: require_connection_id_rotation"
+    },
+    {
+      "injection_layer": "TLS Layer",
+      "attack_method": "Renegotiation attack",
+      "injection_command": "openssl_s_client -connect host:443 -reconnect -no_ticket",
+      "detection_sign": "Session renegotiation count > 2",
+      "countermeasure": "TLS state machine: assert state ∈ valid_transitions"
+    },
+    {
+      "injection_layer": "HTTP/2 Layer",
+      "attack_method": "Stream dependency loop",
+      "injection_command": "nghttp -nv -dependency 1:0 -dependency 2:1 -dependency 1:2",
+      "detection_sign": "3 cycle in stream_graph",
+      "countermeasure": "RFC-compliant validation: enforce_tree_structure()"
+    },
+    {
+      "injection_layer": "QUIC Layer",
+      "attack_method": "Connection ID exhaustion",
+      "injection_command": "for i in {1..65535}; do send_packet(new_cid='1'); done",
+      "detection_sign": "CID allocation rate > 100/s",
+      "countermeasure": "Connection ID limiting: limit_cid_issuance(10/s)"
+    }
+  ],
+  "overlap_rows": [
+    {
+      "scenario": "A14",
+      "attack_vector": "HTTP/2 Continuation Flood",
+      "matrix_trigger": "continuation_count > max_concurrent_streams",
+      "matrix_mitigation": "enforce_h2_rfc7540()"
+    },
+    {
+      "scenario": "A15",
+      "attack_vector": "Encrypted Payload Fuzzing",
+      "matrix_trigger": "wire_format_valid(payload) == False ∨ tls_decryption_error",
+      "matrix_mitigation": "terminate_doh_stream()"
+    }
+  ]
+}
