@@ -1,0 +1,136 @@
+# =============================================================================
+# E3-DoH Reproducibility — Git Attributes
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file standardises line endings across platforms and marks the
+# file types that Git should treat as binary. The rationale is the
+# same as the .gitignore's: a reviewer who checks out the artifact on
+# Windows should get the same behavior as a reviewer on Linux.
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Default: text, auto-normalise line endings
+# -----------------------------------------------------------------------------
+# Git will detect text files and normalise line endings to LF in the
+# repository. When checking out, the platform default is applied
+# unless overridden below.
+
+* text=auto eol=lf
+
+
+# -----------------------------------------------------------------------------
+# Explicit text types
+# -----------------------------------------------------------------------------
+# These are always LF. A reviewer on Windows who edits them will not
+# introduce CRLF into the repository.
+
+*.py       text eol=lf
+*.pyi      text eol=lf
+*.sh       text eol=lf
+*.bash     text eol=lf
+*.md       text eol=lf
+*.rst      text eol=lf
+*.txt      text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.json     text eol=lf
+*.csv      text eol=lf
+*.tsv      text eol=lf
+*.toml     text eol=lf
+*.cfg      text eol=lf
+*.ini      text eol=lf
+*.svg      text eol=lf
+*.html     text eol=lf
+*.css      text eol=lf
+*.js       text eol=lf
+Dockerfile text eol=lf
+Makefile   text eol=lf
+LICENSE    text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+
+# -----------------------------------------------------------------------------
+# Explicit binary types
+# -----------------------------------------------------------------------------
+# These must never have their line endings normalised, or Git will
+# corrupt them.
+
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+*.pdf      binary
+*.zip      binary
+*.tar      binary
+*.tar.gz   binary
+*.tgz      binary
+*.7z       binary
+*.gz       binary
+*.pcap     binary
+*.pcapng   binary
+*.parquet  binary
+*.h5       binary
+*.hdf5     binary
+*.npy      binary
+*.npz      binary
+*.pickle   binary
+*.pkl      binary
+*.pt       binary
+*.pth      binary
+*.ckpt     binary
+*.safetensors binary
+*.woff     binary
+*.woff2    binary
+*.ttf      binary
+*.otf      binary
+
+
+# -----------------------------------------------------------------------------
+# Datasets
+# -----------------------------------------------------------------------------
+# The three external datasets are not committed (see .gitignore). If a
+# reviewer adds a small sample for documentation, mark it binary.
+
+data/raw/**       binary
+data/downloads/** binary
+data/processed/** binary
+data/synthetic/** binary
+
+
+# -----------------------------------------------------------------------------
+# Expected outputs
+# -----------------------------------------------------------------------------
+# The reference files in expected_outputs/ are all text-based (JSON,
+# CSV, SVG) except for the two figure PNGs.
+
+expected_outputs/*.png binary
+expected_outputs/*.svg text eol=lf
+
+
+# -----------------------------------------------------------------------------
+# Documentation and CI
+# -----------------------------------------------------------------------------
+# GitHub Actions and pre-commit hooks must stay LF.
+
+.github/** text eol=lf
+.pre-commit-config.yaml text eol=lf
+
+
+# -----------------------------------------------------------------------------
+# LFS (large file storage)
+# -----------------------------------------------------------------------------
+# The artifact does not currently use LFS. If a future addition needs
+# a large committed binary (>50 MB), route it through LFS via:
+#
+#     git lfs track "expected_outputs/figure_*.png"
+#     git add .gitattributes
+#
+# The .gitignore's "large file handling" note documents the policy.
+# No LFS filter is installed by default; this comment is the placeholder.
