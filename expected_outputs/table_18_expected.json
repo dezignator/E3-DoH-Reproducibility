@@ -1,0 +1,39 @@
+{
+  "table": "table_18",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 18 (p.134) of the thesis",
+  "note": "Table 18 maps five attack injection methods to their detection mechanisms and mitigation actions. The strings below are transcribed verbatim from the thesis and are also present in data/attack_matrix.csv. A fresh run of each simulator's _trigger_and_action() should return exactly these strings; the verification_script compares them exactly.",
+  "scenarios": {
+    "A01": {
+      "name": "DNS Tunneling via DoH",
+      "detection_trigger": "ΔH > 2.5 bits/query ∧ entropy_score > 3.8",
+      "mitigation_action": "iptables -t mangle -A PREROUTING -j DIVERT_SANDBOX",
+      "trigger_fires": true
+    },
+    "A02": {
+      "name": "Timing Side-Channel",
+      "detection_trigger": "corr(t_query, t_resp) < 0.1",
+      "mitigation_action": "inject_padding(random.uniform(100, 250))",
+      "trigger_fires": true
+    },
+    "A03": {
+      "name": "QUIC Congestion Exploit",
+      "detection_trigger": "cwnd_growth_rate > threshold_3σ",
+      "mitigation_action": "rate_limit = baseline * (1 - attack_ratio^2)",
+      "trigger_fires": true
+    },
+    "A04": {
+      "name": "Certificate Injection",
+      "detection_trigger": "verify(SNI, ALPN) == False",
+      "mitigation_action": "send_alert(21); close_connection()",
+      "trigger_fires": true
+    },
+    "A05": {
+      "name": "Padding Oracle",
+      "detection_trigger": "HE.eval(c1 == c2) without decryption",
+      "mitigation_action": "C' = C ⊕ H(noise || timestamp)",
+      "trigger_fires": true
+    }
+  },
+  "tolerances": {}
+}
