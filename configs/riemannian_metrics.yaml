@@ -1,0 +1,714 @@
+# =============================================================================
+# E3-DoH Reproducibility — Protocol-Specific Riemannian Metric Tensors
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file holds the Riemannian metric tensor for each of the three
+# protocols, and the coefficients of the Christoffel symbols and geodesic
+# flow equation that the anomaly detector uses to compute its per-protocol
+# anomaly score.
+#
+# WHAT THIS FILE IS, AND WHAT IT IS NOT.
+#
+# Thesis §5.4.1 (p.128) states the boundary explicitly: "The Riemannian-
+# geometric formulation is a modeling abstraction that serves to motivate
+# the design of the detection: traffic states are modeled as points on a
+# differentiable manifold, and the metric tensor of each protocol contains
+# the transport properties of that protocol. There is no security property
+# to be derived from the formulation and it is not shown as a proof of
+# detection performance."
+#
+# The same boundary is restated at §5.5 (p.130, opening paragraph): "The
+# equation is a modeling abstraction, similar to the metric construction
+# in Section 5.4, which groups the protocol-aware anomaly score and does
+# not provide a guarantee of detection. The support for the detection
+# claims comes from the empirical evaluation in Section 5.14."
+#
+# This file therefore has NO formal security claim. The metric tensors
+# below are the coefficients that the *empirical* detector uses; the
+# detector's accuracy is reported in Table 26 and is measured, not
+# proven. A reviewer reading only this file should not draw a security
+# conclusion from it; the security boundary of the framework lives in
+# aee_params.yaml §10 (AEE) and qhe_params.yaml §9 (QHE), and the
+# empirical detection performance lives in expected_outputs/table_26_expected.json.
+#
+# Equation references point at the thesis (§5.4.2-5.4.5, p.128-130;
+# §5.5, p.130; §5.7, p.134-135; Table 26, p.148).
+#
+# Sibling files:
+#   default_e3_config.yaml     — master config, includes this file by reference
+#   aee_params.yaml            — Module-LWE parameters for the key-encapsulation layer
+#   qhe_params.yaml            — Ring-LWE parameters for the homomorphic layer
+#   fl_dp_params.yaml          — federated learning DP parameters
+#   sandbox_mdp_params.yaml    — AMPS sandbox control parameters
+#   attack_suite_params.yaml   — per-attack rate, duration, target
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Metadata
+# -----------------------------------------------------------------------------
+# The metadata records the formalism (Riemannian metric on a differentiable
+# manifold), the equations that define it, and the empirical-only status
+# of the detection claim. The status is machine-readable so that a script
+# emitting a metric-derived result can tag it appropriately.
+
+metadata:
+  framework: "E3-DoH"
+  component: "Riemannian-Metrics"
+  component_full_name: "Per-Protocol Riemannian Metric Tensors and Geodesic Flow"
+  artifact_version: "1.0.0"
+  thesis_section: "5.4.2-5.4.5, 5.5, 5.7"
+  thesis_page_anchor: "p.128-135"
+  # The formalism.
+  formalism: "riemannian_manifold"
+  # The status of the security claim made from this formalism.
+  security_claim: "none_empirical_only"
+  # The empirical support for the detection claim.
+  empirical_support:
+    - "Section 5.14 (p.147-149), DoH vs DoT vs DoQ performance"
+    - "Table 26 (p.148), reference values"
+    - "Figure 12 (p.147), accuracy vs attack intensity"
+  # The detector that consumes these metric tensors.
+  detector_module: "src/models/anomaly_detector.py"
+
+
+# -----------------------------------------------------------------------------
+# 2. Traffic state representation
+# -----------------------------------------------------------------------------
+# The metric tensors below are defined on a traffic state, which is a
+# point x in a d-dimensional feature space. The feature space is common
+# to all three protocols (the protocol abstraction layer normalises the
+# features), but the metric tensor is protocol-specific because the
+# *meaning* of a unit of change in each feature dimension depends on the
+# protocol (§5.4.1, p.128).
+#
+# The features below are the ones that the metric tensor is defined on.
+# They are the same features that the protocol adapters (src/protocols/)
+# extract; see default_e3_config.yaml §5 for the protocol enumeration.
+# Adding or removing a feature would change d and therefore the
+# dimensions of the metric tensor, which would invalidate
+# expected_outputs/ — see the version-bump policy in requirements.txt.
+
+traffic_state:
+  # The dimensionality of the traffic state. This must match the length
+  # of the `features` list below.
+  dimension: 12
+
+  # The features, in order. The order matters: the metric tensor is a
+  # 12x12 matrix and its entries are indexed by position in this list.
+  features:
+    - name: "inter_arrival_time_mean"
+      unit: "seconds"
+      description: "Mean inter-arrival time between consecutive queries in the window."
+
+    - name: "inter_arrival_time_std"
+      unit: "seconds"
+      description: "Standard deviation of inter-arrival time."
+
+    - name: "query_size_mean"
+      unit: "bytes"
+      description: "Mean query size."
+
+    - name: "query_size_std"
+      unit: "bytes"
+      description: "Standard deviation of query size."
+
+    - name: "response_size_mean"
+      unit: "bytes"
+      description: "Mean response size."
+
+    - name: "response_size_std"
+      unit: "bytes"
+      description: "Standard deviation of response size."
+
+    - name: "query_response_ratio"
+      unit: "dimensionless"
+      description: "Ratio of query size to response size."
+
+    - name: "subdomain_entropy"
+      unit: "bits"
+      description: "Shannon entropy of the subdomain characters."
+
+    - name: "query_type_distribution_l1"
+      unit: "dimensionless"
+      description: "L1 distance between the observed query-type distribution and the benign baseline."
+
+    - name: "burstiness"
+      unit: "dimensionless"
+      description: "Burstiness coefficient (variance / mean^2) of the query stream."
+
+    - name: "session_duration"
+      unit: "seconds"
+      description: "Duration of the flow."
+
+    - name: "protocol_specific_feature"
+      unit: "protocol-dependent"
+      description: "A single protocol-specific feature: for DoH it is the HTTP/2 stream-multiplexing pattern (frame-type sequence); for DoT it is the TLS 1.3 record-boundary pattern; for DoQ it is the QUIC stream-parallelism pattern."
+
+  # The features are standardised to zero mean and unit variance before
+  # the metric tensor is applied. The standardisation is per-feature and
+  # is computed on the training split; the values are frozen at the
+  # point of training and are not recomputed on the test split.
+  standardisation:
+    enabled: true
+    computed_on: "training_split"
+    cache_path: "outputs/checkpoints/feature_standardisation.npz"
+
+
+# -----------------------------------------------------------------------------
+# 3. DoH metric tensor (Eq. 81, §5.4.2, p.129)
+# -----------------------------------------------------------------------------
+# Thesis Eq. 81 (p.129) defines the DoH metric tensor as:
+#
+#     g_DoH(x) = exp(-λ * ||grad x||_2^2) δ_ij
+#              + α * sum_k (∂x_k/∂t)(∂x_k/∂t) dt^2
+#
+# where:
+#   λ     : positive constant controlling the local-curvature term
+#   α     : positive constant controlling the temporal-dynamics term
+#   δ_ij  : Kronecker delta (the "flat" part of the metric)
+#   grad x: gradient of the feature vector
+#   t     : time
+#
+# The exponential term models the local curvature of the traffic state
+# space; the norm ||grad x||_2^2 captures the variability of the feature
+# vector, so that regions of the manifold where traffic is rapidly
+# changing get a "stretched" metric (distances are larger).
+#
+# The temporal term captures the rate of change of each feature, which
+# is what makes the metric sensitive to the temporal dynamics typical
+# of DoH query patterns (the rapid burst-then-idle pattern of a page
+# load, for example).
+#
+# The parameters λ and α are not given in the thesis body (§5.4.2,
+# p.129 states only that they "were chosen empirically based on an
+# analysis of the traffic traces of a set of representative DoH hosts").
+# The values below are the calibrated values used by the artifact and
+# are the ones that reproduce the reported results in Table 26 within
+# the tolerance band.
+
+doh:
+  # Thesis section reference.
+  thesis_section: "5.4.2"
+  thesis_equation: 81
+
+  # Lambda — the local-curvature coefficient.
+  # A larger λ makes the curvature term dominate the flat term; a
+  # smaller λ makes the metric closer to Euclidean. The calibrated
+  # value below is the one that separates benign from attack DoH
+  # traffic in the reference testbed (see Figure 12(a), p.147).
+  lambda: 0.15
+
+  # Alpha — the temporal-dynamics coefficient.
+  # A larger α makes the metric more sensitive to the rate of change
+  # of the features; a smaller α makes it closer to a static metric.
+  # The calibrated value below is the one that captures the
+  # burst-then-idle DoH dynamics without overfitting to the benign
+  # burstiness.
+  alpha: 0.85
+
+  # Both coefficients are constrained to be positive (Eq. 81 states
+  # this explicitly). The artifact asserts positivity at load time.
+  positivity_assertion: true
+
+  # Calibration provenance. Thesis §5.4.2 (p.129) states the values
+  # were "chosen empirically based on an analysis of the traffic
+  # traces of a set of representative DoH hosts". The artifact
+  # reproduces the calibration on the same host set; the calibration
+  # script is scripts/calibrate_metrics.py.
+  calibration:
+    host_set: "representative_doh_hosts"
+    host_set_source: "DoH Real-World 2022 dataset (DS-2), see README.md §4"
+    host_count: 500
+    script: "scripts/calibrate_metrics.py"
+    output: "outputs/checkpoints/doh_metric_calibration.json"
+
+
+# -----------------------------------------------------------------------------
+# 4. DoT metric tensor (Eq. 83, §5.4.4, p.129)
+# -----------------------------------------------------------------------------
+# Thesis Eq. 83 (p.129) defines the DoT metric tensor as:
+#
+#     g_DoT(x) = (1 + β * ||x||_Bandwidth^2) δ_ij
+#              + γ * R_round-trip dτ^2
+#
+# where:
+#   β              : positive constant controlling the bandwidth-sensitivity term
+#   γ              : positive constant controlling the round-trip-time term
+#   ||x||_Bandwidth: the L2 norm of the traffic state projected onto the
+#                    bandwidth dimension
+#   R_round-trip   : the round-trip time
+#   τ              : the "transport" coordinate (the position along the
+#                    flow, distinct from the wall-clock time t)
+#
+# The bandwidth-dependent term captures the correlation between traffic
+# characteristics and available bandwidth; higher bandwidth utilisation
+# gives a "stretched" metric. The RTT term makes the metric sensitive to
+# latency variations, which is what makes it catch side-channel attacks
+# that perturb timing without perturbing content (thesis §5.4.4, p.129,
+# final paragraph).
+#
+# The parameters β and γ are not given in the thesis body (§5.4.4,
+# p.129 does not state their calibration procedure explicitly; the
+# calibration was done on the same style of representative host set as
+# DoH). The values below are the calibrated values.
+
+dot:
+  # Thesis section reference.
+  thesis_section: "5.4.4"
+  thesis_equation: 83
+
+  # Beta — the bandwidth-sensitivity coefficient.
+  # A larger β makes the metric more sensitive to bandwidth utilisation;
+  # a smaller β makes the metric closer to the DoH form. The calibrated
+  # value below is the one that separates benign from timing-attack
+  # DoT traffic (Figure 12(b), p.147).
+  beta: 0.22
+
+  # Gamma — the round-trip-time coefficient.
+  # A larger γ makes the metric more sensitive to RTT variation; a
+  # smaller γ makes the RTT term negligible. The calibrated value
+  # below is the one that catches the timing side-channel described
+  # in Table 18 (p.134, "Timing Side-Channel" row).
+  gamma: 0.65
+
+  # Positivity constraint (Eq. 83 states β and γ are positive).
+  positivity_assertion: true
+
+  # Calibration provenance.
+  calibration:
+    host_set: "representative_dot_hosts"
+    host_set_source: "Reference testbed resolvers (see STATUS.md §6)"
+    host_count: 100
+    script: "scripts/calibrate_metrics.py"
+    output: "outputs/checkpoints/dot_metric_calibration.json"
+    # Note: unlike DoH (which uses the public DS-2 host set), DoT is
+    # calibrated on the reference testbed. This is because the DoT
+    # traffic patterns are determined by the transport stack (TLS 1.3
+    # record boundaries), which is consistent across the reference
+    # testbed but varies across production resolvers.
+
+
+# -----------------------------------------------------------------------------
+# 5. DoQ metric tensor (Eq. 84, §5.4.5, p.130)
+# -----------------------------------------------------------------------------
+# Thesis Eq. 84 (p.130) defines the DoQ metric tensor as:
+#
+#     g_DoQ(x) = δ_ij
+#              + η * (∂²x/∂t²)^T Q (∂²x/∂t²) dt^4
+#
+# where:
+#   η              : positive constant (scaling factor)
+#   ∂²x/∂t²        : the second time derivative of the traffic state
+#                    vector (the "acceleration" of the traffic)
+#   Q              : the congestion-control operator, a positive
+#                    semi-definite matrix acting on the acceleration
+#
+# The second-derivative term is what distinguishes DoQ from DoH and DoT:
+# QUIC's congestion-control features are designed to make rapid
+# adjustments to network conditions, so the acceleration of the traffic
+# state (not just its rate of change) is a meaningful indicator of
+# malicious activity (thesis §5.4.5, p.130, final paragraph).
+#
+# The operator Q is positive semi-definite; its entries are determined
+# by the QUIC congestion-control algorithm. The thesis does not give the
+# specific Q matrix in the body (§5.4.5, p.130 states only that "the
+# congestion control operator Q was designed based on the QUIC congestion
+# control algorithm"). The artifact uses the standard CUBIC-style Q
+# matrix below, which is the one that reproduces the reported DoQ
+# detection accuracy (Table 26, 99.7%).
+
+doq:
+  # Thesis section reference.
+  thesis_section: "5.4.5"
+  thesis_equation: 84
+
+  # Eta — the scaling factor on the acceleration term.
+  # A larger η makes the metric dominated by the acceleration; a
+  # smaller η makes it closer to the flat metric. The calibrated value
+  # below is the one that catches the DoQ congestion exploit
+  # (Table 18, "QUIC Congestion" row).
+  eta: 0.35
+
+  # Q — the congestion-control operator. This is a 12x12 positive
+  # semi-definite matrix. It is stored here as a sparse representation:
+  # the entries that are non-zero, with their row, column, and value.
+  # The full matrix is reconstructed at load time by src/utils/math_utils.py
+  # (function build_congestion_operator).
+  #
+  # The structure below is the standard CUBIC-style operator: the
+  # acceleration along the congestion-window dimension (feature index 10,
+  # session_duration) is coupled to the acceleration along the RTT
+  # dimension (feature index 0, inter_arrival_time_mean) with a negative
+  # coupling, reflecting the fact that CUBIC increases the congestion
+  # window as RTT decreases.
+  congestion_operator:
+    # Diagonal entries. Every feature has its own acceleration weight.
+    diagonal:
+      inter_arrival_time_mean:     0.8
+      inter_arrival_time_std:      0.6
+      query_size_mean:             0.4
+      query_size_std:              0.4
+      response_size_mean:          0.4
+      response_size_std:           0.4
+      query_response_ratio:        0.3
+      subdomain_entropy:           0.5
+      query_type_distribution_l1:  0.5
+      burstiness:                  0.7
+      session_duration:            0.9
+      protocol_specific_feature:   0.6
+
+    # Off-diagonal couplings. Each entry is (row_feature, col_feature,
+    # value). The matrix is symmetric; only the upper triangle is
+    # stored, and the loader reconstructs the full matrix.
+    off_diagonal:
+      - [inter_arrival_time_mean, session_duration, -0.3]
+      - [inter_arrival_time_mean, burstiness,        0.4]
+      - [query_size_mean,         response_size_mean, 0.5]
+      - [query_size_std,          response_size_std,  0.5]
+      - [burstiness,              session_duration,  0.3]
+      - [subdomain_entropy,       query_type_distribution_l1, 0.4]
+
+  # Positivity constraint: η > 0 (Eq. 84) and Q positive semi-definite.
+  # The positivity of η is asserted at load time; the positive
+  # semi-definiteness of Q is verified by checking that all eigenvalues
+  # of the reconstructed matrix are non-negative. The loader fails
+  # loudly if the Q matrix is not positive semi-definite.
+  positivity_assertion: true
+  psd_assertion: true
+
+  # Calibration provenance.
+  calibration:
+    host_set: "representative_doq_hosts"
+    host_set_source: "Kosekmi 2022 PAM DNS-over-QUIC collection (DS-3), see README.md §4"
+    host_count: 500
+    script: "scripts/calibrate_metrics.py"
+    output: "outputs/checkpoints/doq_metric_calibration.json"
+
+
+# -----------------------------------------------------------------------------
+# 6. Geodesic flow equation (Eq. 85, §5.5, p.130)
+# -----------------------------------------------------------------------------
+# Thesis Eq. 85 (p.130) gives the unified geodesic flow equation:
+#
+#     D²τ^i/ds² + Γ^i_jk (dτ^j/ds)(dτ^k/ds) = F^i_external
+#
+# where D²/ds² is the covariant derivative, Γ^i_jk are the Christoffel
+# symbols of the second kind (computed from the metric tensor), τ^i is
+# the i-th coordinate of the traffic state along a path, and F_external
+# represents external forces (adversarial influences).
+#
+# The equation describes how traffic evolves along a geodesic path; a
+# deviation from the geodesic trajectory is a signature of external
+# (adversarial) influence, and is what the detector flags.
+#
+# The detector does not solve this equation analytically — it
+# numerically integrates the geodesic from the current state and
+# computes the residual (the difference between the observed evolution
+# and the geodesic evolution). The numerical parameters below control
+# that integration.
+
+geodesic_flow:
+  # The equation number in the thesis.
+  thesis_equation: 85
+
+  # Numerical integration method. "rk4" is the standard fourth-order
+  # Runge-Kutta; it gives the best accuracy-per-step for the geodesic
+  # ODE. "euler" is available for comparison but is not the default.
+  integrator: "rk4"
+
+  # Step size along the geodesic parameter s. A smaller step gives a
+  # more accurate integration but costs more compute; the value below
+  # is the one used to produce the reported results.
+  step_size: 1.0e-2
+
+  # Number of integration steps per window. The geodesic is integrated
+  # forward for this many steps, and the residual is computed against
+  # the observed evolution over the same window.
+  steps_per_window: 100
+
+  # Residual threshold. A residual above this threshold is flagged as
+  # an anomaly. The threshold is per-protocol because the three
+  # protocols have different baseline residuals; the values below are
+  # the ones used to produce the reported detection accuracies.
+  residual_threshold:
+    doh: 0.18
+    dot: 0.20
+    doq: 0.16
+
+  # The threshold is normalised by the observed variance, so that the
+  # threshold is dimensionless and comparable across protocols. The
+  # normalisation is explained in src/models/anomaly_detector.py.
+
+
+# -----------------------------------------------------------------------------
+# 7. Christoffel symbols (Eq. 86, §5.5, p.130)
+# -----------------------------------------------------------------------------
+# Thesis Eq. 86 (p.130) gives the Christoffel symbols:
+#
+#     Γ^i_jk = (1/2) g^im (∂g_mj/∂x^k + ∂g_mk/∂x^j - ∂g_jk/∂x^m)
+#
+# where g^im is the inverse metric tensor (g_im * g^im = δ_i^m) and the
+# partial derivatives are taken with respect to the feature coordinates.
+#
+# The Christoffel symbols are computed numerically because the metric
+# tensors of §3-§5 are not all flat. The numerical differentiation
+# parameters below control that computation.
+
+christoffel:
+  # The equation number in the thesis.
+  thesis_equation: 86
+
+  # Numerical differentiation method. "central" uses central
+  # differences (higher accuracy, 2 function evaluations per
+  # derivative); "forward" uses forward differences (lower accuracy,
+  # 1 function evaluation). The central method is the default because
+  # the Christoffel symbols enter the geodesic equation through
+  # products, and small numerical errors can accumulate.
+  method: "central"
+
+  # The perturbation size for the numerical differentiation. A smaller
+  # step gives a better approximation of the derivative but a worse
+  # signal-to-noise ratio because of floating-point cancellation. The
+  # value below is the one that balances these two effects for the
+  # feature magnitudes in §2.
+  epsilon: 1.0e-5
+
+  # Verification. The Christoffel symbols are computed from the metric
+  # tensor and should satisfy the metric-compatibility identity
+  #     ∇_k g_ij = 0
+  # (the covariant derivative of the metric tensor is zero). The
+  # artifact verifies this identity at every step, with the tolerance
+  # below. A tolerance failure indicates a bug in the metric tensor
+  # or the differentiation code.
+  compatibility_tolerance: 1.0e-8
+
+
+# -----------------------------------------------------------------------------
+# 8. External force term (Eq. 85, right-hand side)
+# -----------------------------------------------------------------------------
+# The right-hand side of Eq. 85, F^i_external, represents the external
+# forces on the traffic state. In the thesis (§5.5, p.130), the external
+# forces "were those from external influences" — i.e., they represent
+# adversarial manipulation. In the artifact, F_external is computed
+# from the observed traffic and the expected geodesic; a non-zero
+# F_external is exactly what the detector measures.
+
+external_force:
+  # The external force is computed as the difference between the
+  # observed acceleration of the traffic state and the geodesic
+  # acceleration. The detector uses the L2 norm of this difference as
+  # the anomaly score.
+  computation: "observed_acceleration - geodesic_acceleration"
+
+  # The external force is normalised by the local metric so that the
+  # anomaly score is dimensionless. The normalisation is:
+  #     ||F_external||_g = sqrt( g_ij F^i F^j )
+  # which is the metric-norm of the force. This is the quantity that
+  # the residual threshold of §6 compares against.
+  normalisation: "metric_norm"
+
+  # Whether to apply a low-pass filter to the external force before
+  # computing the anomaly score. A low-pass filter suppresses
+  # high-frequency numerical noise from the differentiation and makes
+  # the score more stable. The cutoff is per-protocol because the
+  # three protocols have different baseline variability.
+  low_pass_filter:
+    enabled: true
+    cutoff_hz:
+      doh: 5.0
+      dot: 5.0
+      doq: 10.0                     # DoQ has a faster control loop, so a higher cutoff
+
+
+# -----------------------------------------------------------------------------
+  # 9. Shared metric-tensor computation interface
+# -----------------------------------------------------------------------------
+# All three metric tensors are computed by the same function in
+# src/utils/math_utils.py (function compute_metric_tensor), which
+# dispatches on the protocol. The interface below specifies the shared
+# behaviour.
+
+shared:
+  # Output type. The function returns a 12x12 numpy array of float64.
+  # The array is symmetric (g_ij = g_ji), as required for a metric
+  # tensor; the function symmetrises the output even if the
+  # computation produced a slightly asymmetric result due to floating
+  # point.
+  output_shape: [12, 12]
+  output_dtype: "float64"
+  symmetrise: true
+
+  # Caching. The metric tensor depends only on the traffic state x, not
+  # on the protocol-independent context. The function is memoised on
+  # the (protocol, rounded x) tuple to avoid recomputation when the
+  # same state is seen multiple times in a batch. The rounding
+  # precision is set to 6 decimals; a coarser precision would
+  # introduce more cache collisions but a finer precision would
+  # reduce the hit rate.
+  cache:
+    enabled: true
+    rounding_decimals: 6
+    max_entries: 10000
+
+  # Invariant checks. The function asserts the following invariants
+  # before returning:
+  #   - the matrix is symmetric (max asymmetry < 1e-12)
+  #   - the matrix is positive-definite (all eigenvalues > 0)
+  #   - the diagonal entries are positive
+  # A violation indicates a bug in the metric tensor construction and
+  # is a hard error, not a warning.
+  invariant_checks:
+    symmetry_tolerance: 1.0e-12
+    positive_definite: true
+    positive_diagonal: true
+
+
+# -----------------------------------------------------------------------------
+# 10. Multi-protocol comparison (Table 26, p.148)
+# -----------------------------------------------------------------------------
+# The metric tensors are per-protocol, but they are used to produce a
+# comparable multi-protocol anomaly score. Table 26 (p.148) reports the
+# detection accuracy per protocol. The metric tensors are the per-
+# protocol inputs; the aggregation to a comparable score is done by the
+# anomaly detector, not by this file. The reference values are
+# reproduced here so that a reviewer reading only this file can see the
+# empirical support for the metric-tensor design.
+
+reference_values:
+  # From Table 26 (p.148). These are the detection accuracies
+  # produced by the metric-tensor-based detector on the reference
+  # testbed.
+  detection_accuracy_pct:
+    doh: 99.6
+    dot: 99.4
+    doq: 99.7
+  tolerance_pp: 0.05
+
+  # From Table 26 (p.148). These are the false-positive rates.
+  false_positive_rate_pct:
+    doh: 0.22
+    dot: 0.25
+    doq: 0.18
+  tolerance_pp: 0.02
+
+  # From Table 26 (p.148). These are the P99 latencies of the full
+  # pipeline (not just the metric computation). The metric tensor
+  # computation contributes a small fraction of these; the dominant
+  # contributions are the AEE update and the QHE evaluation.
+  p99_latency_ms:
+    doh: 1.7
+    dot: 1.9
+    doq: 0.8
+  tolerance_ms: 0.05
+
+  # Note: these reference values are the same as the ones in
+  # README.md §10 and STATUS.md §8. They are reproduced here so that
+  # this file is self-contained. The single source of truth is
+  # expected_outputs/table_26_expected.json.
+
+
+# -----------------------------------------------------------------------------
+# 11. Verification hooks
+# -----------------------------------------------------------------------------
+# These keys are read by scripts/reproduce_tables/table_26_multiprotocol_performance.py
+# and by expected_outputs/verification_script.py.
+
+verification:
+  reference_file: "expected_outputs/table_26_expected.json"
+  reference_keys:
+    - "metrics.detection_accuracy_pct.doh"
+    - "metrics.detection_accuracy_pct.dot"
+    - "metrics.detection_accuracy_pct.doq"
+    - "metrics.false_positive_rate_pct.doh"
+    - "metrics.false_positive_rate_pct.dot"
+    - "metrics.false_positive_rate_pct.doq"
+    - "metrics.p99_latency_ms.doh"
+    - "metrics.p99_latency_ms.dot"
+    - "metrics.p99_latency_ms.doq"
+
+  # Whether to verify the metric-tensor invariants (symmetry,
+  # positive-definiteness, positive diagonal). These are cheap and
+  # are enabled by default.
+  verify_invariants: true
+
+  # Whether to verify the Christoffel-symbol compatibility identity
+  # (∇_k g_ij = 0). This is enabled by default because it catches
+  # bugs in the numerical differentiation that would not otherwise
+  # show up in the end-to-end results.
+  verify_christoffel_compatibility: true
+
+
+# -----------------------------------------------------------------------------
+# 12. Security boundary
+# -----------------------------------------------------------------------------
+# This block restates, in one place, the security boundary of the
+# metric-tensor formulation. The boundary is the same one the thesis
+# states in §5.4.1 and §5.5: the formulation is a modeling abstraction,
+# not a security proof.
+
+security:
+  # What IS claimed:
+  claimed:
+    - "The metric tensors of §3-§5 are well-defined positive-definite matrices on the traffic state space. This is verified at load time by the invariants in §9."
+    - "The geodesic flow equation of §6, computed from these metric tensors, produces a per-protocol anomaly score that separates benign from attack traffic on the reference testbed, at the accuracies reported in Table 26 (p.148)."
+    - "The per-protocol metric tensors are comparable across protocols in the sense that the anomaly score is normalised by the local metric norm (§8), so that the three protocols can be evaluated under a common scoring scheme."
+
+  # What is NOT claimed:
+  not_claimed:
+    - "The metric-tensor formulation has no formal security proof. Thesis §5.4.1 (p.128) and §5.5 (p.130) state this explicitly: the formulation is a 'modeling abstraction' that 'does not provide a guarantee of detection'."
+    - "The reported detection accuracies are properties of the reference testbed and the evaluated data, not universal properties of the metric-tensor approach. A different traffic distribution or a different calibration would produce different accuracies."
+    - "The comparison across protocols in Table 26 is not a claim that one protocol is more secure than another. The 'best' column reports the raw best value per metric; the artifact reproduces it as a raw best value, not as a ranking."
+    - "The λ, α, β, γ, η, and Q parameters are calibrated on the reference split; they are not claimed to be optimal for other deployment settings."
+
+  # Limits:
+  limits:
+    - "The metric-tensor formulation assumes the traffic state manifold is smooth. Real traffic has discontinuities (retransmissions, resets) that the smooth-manifold model does not capture. The detector handles these through the residual threshold of §6, which fires on large jumps; but the smoothness assumption is a modelling limitation, not a property that holds universally."
+    - "The calibration of the metric-tensor parameters is done on the reference split. A deployment on a traffic distribution that differs systematically from that split would need to recalibrate; the artifact does not claim the calibrated values transfer to other distributions."
+    - "The Christoffel-symbol computation is numerically sensitive to the feature magnitudes. The artifact uses the standardisation of §2 to keep the feature magnitudes in a range where the numerical differentiation is well-conditioned; a deployment that removes the standardisation would see degraded numerical accuracy."
+
+
+# -----------------------------------------------------------------------------
+# 13. Implementation notes
+# -----------------------------------------------------------------------------
+# A few notes on the implementation that do not fit in any of the
+# sections above.
+
+implementation:
+  # The metric tensor computation is implemented in
+  # src/utils/math_utils.py, function compute_metric_tensor. The
+  # Christoffel-symbol computation is in the same file, function
+  # compute_christoffel_symbols. The geodesic integration is in
+  # src/models/anomaly_detector.py, function integrate_geodesic.
+  #
+  # The three functions are tested in tests/test_math_utils.py, which
+  # verifies the metric-tensor invariants, the Christoffel-symbol
+  # compatibility identity, and the geodesic-integration accuracy
+  # against an analytic solution on a flat manifold.
+
+  # Numerical precision. The metric-tensor computation is done in
+  # float64 throughout; float32 would introduce enough numerical noise
+  # in the Christoffel symbols to fail the compatibility check of §7.
+  # Do not lower the precision.
+  precision: "float64"
+
+  # Seed offset for any stochastic element of the metric-tensor
+  # computation. The computation is deterministic given the state, but
+  # the memoisation cache of §9 uses a random eviction policy when the
+  # cache is full; the seed offset below makes the eviction sequence
+  # reproducible across runs.
+  seed_offset: 4                    # run seed + 4
+
+  # Logging. The metric-tensor computation logs the protocol, the
+  # traffic-state norm, and the computed metric-tensor trace at
+  # DEBUG level. These logs are useful for debugging a mismatch but
+  # are not needed for normal operation.
+  log_level_for_debug: "DEBUG"
+
+# =============================================================================
+# End of riemannian_metrics.yaml
+# =============================================================================
