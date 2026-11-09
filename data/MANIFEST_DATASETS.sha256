@@ -1,0 +1,38 @@
+# =============================================================================
+# E3-DoH Reproducibility — Dataset SHA-256 Manifest
+# =============================================================================
+#
+# This file records the SHA-256 of every external dataset used by
+# Chapter 5. It is checked by data/download_datasets.py when
+# --verify-sha256 is passed (the default in full mode).
+#
+# The entries below are `<TO_BE_POPULATED>` until the first successful
+# full-mode download. To populate:
+#
+#     python data/download_datasets.py --mode full --verify-sha256
+#
+# That run will compute and log the observed hash for each dataset
+# to outputs/logs/dataset_hashes.json. Paste those hashes into the
+# lines below, then commit this file in the same commit as the
+# dataset download log.
+#
+# Format (standard sha256sum):
+#     <64-hex-digest>  <dataset-id>
+#
+# Until populated, download_datasets.py issues a warning but proceeds
+# (strict mode with --strict-hash turns the warning into a hard
+# failure). This is documented in the script's module docstring.
+#
+# =============================================================================
+
+# DS-1: Zenodo encrypted-DNS corpus (32 GB)
+# DOI: 10.5281/zenodo.5957677
+<TO_BE_POPULATED>  DS-1
+
+# DS-2: DoH Real-World 2022 corpus (4 GB)
+# DOI: 10.5281/zenodo.5957677
+<TO_BE_POPULATED>  DS-2
+
+# DS-3: Kosekmi 2022 PAM DNS-over-QUIC collection (3 GB)
+# DOI: 10.5281/zenodo.5957677
+<TO_BE_POPULATED>  DS-3
