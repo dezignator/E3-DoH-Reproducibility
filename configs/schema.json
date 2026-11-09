@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/e3doh-reproducibility/configs/schema.json",
+  "title": "E3-DoH Master Configuration Schema",
+  "description": "Schema for configs/default_e3_config.yaml. Validates the top-level structure and the required fields that every script in the artifact depends on. The per-component includes (aee_params.yaml, qhe_params.yaml, etc.) have their own schemas which are validated independently by the components that load them.",
+  "type": "object",
+  "required": [
+    "artifact", "runtime", "hardware", "paths", "protocols",
+    "detection", "logging", "verification", "federated",
+    "attack_suite", "includes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "artifact": {
+      "type": "object",
+      "required": ["name", "version", "chapter", "framework"],
+      "additionalProperties": true,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Semantic version; must match STATUS.md §1 and setup.py's PACKAGE_VERSION."
+        },
+        "chapter": {"type": "integer", "enum": [5]},
+        "framework": {"type": "string", "enum": ["E3-DoH"]},
+        "thesis_title": {"type": "string"},
+        "citation_key": {"type": "string"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["mode", "seed", "deterministic"],
+      "additionalProperties": true,
+      "properties": {
+        "mode": {"type": "string", "enum": ["toy", "full"]},
+        "seed": {"type": "integer", "minimum": 0},
+        "deterministic": {"type": "boolean"},
+        "cudnn_benchmark": {"type": "boolean"},
+        "torch_threads": {"type": "integer", "minimum": 0},
+        "numpy_threads": {"type": "integer", "minimum": 0},
+        "omp_threads": {"type": "integer", "minimum": 0},
+        "num_workers": {"type": "integer", "minimum": 1},
+        "strict": {"type": "boolean"}
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "required": ["device"],
+      "additionalProperties": true,
+      "properties": {
+        "device": {"type": "string", "enum": ["cpu", "gpu", "auto"]},
+        "strict_gpu": {"type": "boolean"},
+        "a100": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "backend": {"type": "string", "enum": ["emulated", "real"]},
+            "calibration_factor": {"type": "number", "exclusiveMinimum": 0}
+          }
+        },
+        "loihi": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "backend": {"type": "string", "enum": ["emulated", "real"]},
+            "calibration_factor": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "required": ["data_raw", "data_processed", "outputs", "expected"],
+      "additionalProperties": true,
+      "properties": {
+        "data_raw": {"type": "string"},
+        "data_downloads": {"type": "string"},
+        "data_processed": {"type": "string"},
+        "data_synthetic": {"type": "string"},
+        "feature_store": {"type": "string"},
+        "outputs": {"type": "string"},
+        "outputs_tables": {"type": "string"},
+        "outputs_figures": {"type": "string"},
+        "outputs_logs": {"type": "string"},
+        "outputs_checkpoints": {"type": "string"},
+        "expected": {"type": "string"},
+        "manifest": {"type": "string"},
+        "configs_dir": {"type": "string"},
+        "artifacts": {"type": "string"}
+      }
+    },
+    "protocols": {
+      "type": "object",
+      "required": ["enabled", "doh", "dot", "doq"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["doh", "dot", "doq"]},
+          "minItems": 1, "uniqueItems": true
+        },
+        "doh": {
+          "type": "object",
+          "required": ["enabled", "transport", "default_port"],
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "transport": {"type": "string", "enum": ["http2", "http3"]},
+            "default_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "sandbox_action": {"type": "string"}
+          }
+        },
+        "dot": {
+          "type": "object",
+          "required": ["enabled", "default_port", "tls_min_version"],
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "default_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "tls_min_version": {"type": "string", "enum": ["1.3"]},
+            "sandbox_action": {"type": "string"}
+          }
+        },
+        "doq": {
+          "type": "object",
+          "required": ["enabled", "default_port", "quic_version"],
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "default_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "quic_version": {"type": "integer", "enum": [1]},
+            "sandbox_action": {"type": "string"}
+          }
+        }
+      }
+    },
+    "detection": {
+      "type": "object",
+      "required": ["anomaly_threshold", "window_seconds", "min_flows_per_window"],
+      "additionalProperties": true,
+      "properties": {
+        "anomaly_threshold": {
+          "type": "object",
+          "required": ["doh", "dot", "doq"],
+          "additionalProperties": false,
+          "properties": {
+            "doh": {"type": "number", "minimum": 0, "maximum": 1},
+            "dot": {"type": "number", "minimum": 0, "maximum": 1},
+            "doq": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "window_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "min_flows_per_window": {"type": "integer", "minimum": 3},
+        "composite_weights": {
+          "type": "object",
+          "required": ["accuracy", "precision", "latency"],
+          "properties": {
+            "accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "precision": {"type": "number", "minimum": 0, "maximum": 1},
+            "latency": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "composite_flag_threshold": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "logging": {
+      "type": "object",
+      "required": ["level", "format", "file"],
+      "additionalProperties": true,
+      "properties": {
+        "level": {"type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"]},
+        "format": {"type": "string", "enum": ["json", "text"]},
+        "file": {"type": "string"},
+        "write_run_header": {"type": "boolean"},
+        "hash_configs": {"type": "boolean"},
+        "progress_interval_seconds": {"type": "number", "minimum": 0}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tolerance_overrides": {
+          "type": "object",
+          "additionalProperties": {"type": "number", "minimum": 0}
+        },
+        "byte_level_figures": {"type": "boolean"},
+        "fail_fast": {"type": "boolean"},
+        "emit_diff": {"type": "boolean"}
+      }
+    },
+    "federated": {
+      "type": "object",
+      "required": ["rounds", "clients_per_protocol"],
+      "additionalProperties": true,
+      "properties": {
+        "rounds": {"type": "integer", "minimum": 1},
+        "clients_per_protocol": {
+          "type": "object",
+          "required": ["doh", "dot", "doq"],
+          "properties": {
+            "doh": {"type": "integer", "minimum": 1},
+            "dot": {"type": "integer", "minimum": 1},
+            "doq": {"type": "integer", "minimum": 1}
+          }
+        },
+        "client_sample_rate": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "cross_check_enabled": {"type": "boolean"},
+        "convergence": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "target_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+            "patience": {"type": "integer", "minimum": 1},
+            "min_gradient_norm": {"type": "number", "minimum": 0},
+            "max_rounds": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "attack_suite": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "execute": {"type": "boolean"},
+        "isolation": {"type": "boolean"},
+        "namespace_prefix": {"type": "string"},
+        "capture_pcap": {"type": "boolean"},
+        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "includes": {
+      "type": "object",
+      "required": ["aee", "qhe", "fl_dp", "sandbox_mdp",
+                   "riemannian_metrics", "attack_suite", "schema"],
+      "additionalProperties": false,
+      "properties": {
+        "aee": {"type": "string", "pattern": "\\.yaml$"},
+        "qhe": {"type": "string", "pattern": "\\.yaml$"},
+        "fl_dp": {"type": "string", "pattern": "\\.yaml$"},
+        "sandbox_mdp": {"type": "string", "pattern": "\\.yaml$"},
+        "riemannian_metrics": {"type": "string", "pattern": "\\.yaml$"},
+        "attack_suite": {"type": "string", "pattern": "\\.yaml$"},
+        "schema": {"type": "string", "pattern": "\\.json$"}
+      }
+    }
+  }
+}
