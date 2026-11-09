@@ -1,0 +1,40 @@
+{
+  "table": "table_19",
+  "provenance": "thesis_reference_values",
+  "source": "Chapter 5, Table 19 (p.137) of the thesis",
+  "verdict": "Partial",
+  "verdict_reason": "The absolute QPS values require the reference testbed (STATUS.md §6). The rows below are the thesis reference values; a fresh run reproduces the *trend* (monotone latency, monotone degradation, monotone FL-round-time) on any hardware, but the absolute values only on the reference testbed. See REPRODUCIBILITY_CHECKLIST.md §2 and §4 for the full rationale.",
+  "note": "The tolerance band on p99_ms_estimated is deliberately loose (0.2 ms) to accommodate hardware differences; the trend assertions in table_19_scalability.py are the primary correctness check.",
+  "rows": {
+    "baseline": {
+      "p99_ms_estimated": 0.9,
+      "degradation_pct_estimated": 0.9,
+      "fl_round_s_estimated": 120
+    },
+    "medium": {
+      "p99_ms_estimated": 1.3,
+      "degradation_pct_estimated": 1.2,
+      "fl_round_s_estimated": 95
+    },
+    "high": {
+      "p99_ms_estimated": 1.7,
+      "degradation_pct_estimated": 3.1,
+      "fl_round_s_estimated": 78
+    },
+    "peak": {
+      "p99_ms_estimated": 2.0,
+      "degradation_pct_estimated": 4.8,
+      "fl_round_s_estimated": 65
+    },
+    "overload": {
+      "p99_ms_estimated": 3.8,
+      "degradation_pct_estimated": 12.7,
+      "fl_round_s_estimated": 52
+    }
+  },
+  "tolerances": {
+    "p99_ms_estimated": 0.2,
+    "degradation_pct_estimated": 2.0,
+    "fl_round_s_estimated": 10.0
+  }
+}
